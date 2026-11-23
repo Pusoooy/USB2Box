@@ -1,0 +1,134 @@
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror  host/mock_device.c firmware/src/adc_service.c firmware/src/app.c firmware/src/device.c firmware/src/frame.c firmware/src/i2c_service.c firmware/src/jobs.c firmware/src/pwm_service.c firmware/src/resources.c firmware/src/spi_service.c firmware/src/uart_service.c host/adc_mock.c host/i2c_mock.c host/pwm_mock.c host/spi_mock.c host/uart_mock.c  -o build/host/mock-device
+QT_QPA_PLATFORM=offscreen PYTHONPATH=pc /workspace/usb2box-tools/pcenv/bin/python -m unittest discover -s tests -p 'test_gui.py' -v
+test_mock_workbench (test_gui.GUITests.test_mock_workbench) ... Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+This plugin does not support propagateSizeHints()
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.558s
+
+OK
+python3 tools/arm_dependencies.py verify ".deps"
+python3 -m unittest discover -s tests -p 'test_resources.py' -v
+test_dma_pair_and_cross_service_allocations (test_resources.ResourceTests.test_dma_pair_and_cross_service_allocations) ... ok
+test_package_and_gpio_conflicts (test_resources.ResourceTests.test_package_and_gpio_conflicts) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+
+OK
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror -g  tests/test_frame.c firmware/src/frame.c  -o build/host/test-frame
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -Ifirmware/src -std=c11 -Wall -Wextra -Werror -g  tests/test_clock.c firmware/src/clock_policy.c  -o build/host/test-clock
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror  tests/test_device.c firmware/src/device.c firmware/src/frame.c  -o build/host/test-device
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror  tests/test_runtime.c firmware/src/resources.c firmware/src/jobs.c firmware/src/device.c firmware/src/frame.c  -o build/host/test-runtime
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror  tests/test_uart.c firmware/src/uart_service.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/uart_mock.c  -o build/host/test-uart
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror  tests/test_i2c.c firmware/src/i2c_service.c firmware/src/jobs.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/i2c_mock.c  -o build/host/test-i2c
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror  tests/test_pwm.c firmware/src/pwm_service.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/pwm_mock.c  -o build/host/test-pwm
+cmsis-core: archive SHA-256 and source files verified
+cmsis-device: archive SHA-256 and source files verified
+hal: archive SHA-256 and source files verified
+tinyusb: archive SHA-256 and source files verified
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror  tests/test_spi.c firmware/src/spi_service.c firmware/src/jobs.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/spi_mock.c  -o build/host/test-spi
+mkdir -p build/host
+cc -Ifirmware/include -Ibuild/generated -std=c11 -Wall -Wextra -Werror  tests/test_adc.c firmware/src/adc_service.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/adc_mock.c  -o build/host/test-adc
+PYTHONPATH=pc python3 -m unittest discover -s tests -p 'test_sdk.py' -v
+test_async_stream_and_cli (test_sdk.SDKTests.test_async_stream_and_cli) ... mkdir -p build/debug
+arm-none-eabi-gcc -Ifirmware/include -Ibuild/generated -DSTM32F401xC -DUSER_VECT_TAB_ADDRESS -DHSE_VALUE=0u -DUSB2BOX_VID=0 -DUSB2BOX_PID=0 -isystem /workspace/usb2box-tools/arm/usr/bin/../include/newlib -isystem .deps/tinyusb/src -isystem .deps/cmsis-core/CMSIS/Core/Include -isystem .deps/cmsis-device/Include -isystem .deps/hal/Inc -std=c11 -Wall -Wextra -Werror -mcpu=cortex-m4 -mthumb -ffreestanding -ffunction-sections -fdata-sections -Og -g3 firmware/src/startup.S firmware/src/main.c firmware/src/frame.c firmware/src/bsp.c firmware/src/clock_policy.c firmware/src/memory.c firmware/src/device.c firmware/src/app.c firmware/src/uart_service.c firmware/src/uart_stm32.c firmware/src/i2c_service.c firmware/src/i2c_stm32.c firmware/src/pwm_service.c firmware/src/pwm_stm32.c firmware/src/spi_service.c firmware/src/spi_stm32.c firmware/src/adc_service.c firmware/src/adc_stm32.c firmware/src/jobs.c firmware/src/resources.c firmware/src/usb_link.c firmware/src/usb_descriptors.c .deps/cmsis-device/Source/Templates/system_stm32f4xx.c .deps/hal/Src/stm32f4xx_hal.c .deps/hal/Src/stm32f4xx_hal_rcc.c .deps/hal/Src/stm32f4xx_hal_gpio.c .deps/hal/Src/stm32f4xx_hal_cortex.c .deps/hal/Src/stm32f4xx_hal_dma.c .deps/hal/Src/stm32f4xx_hal_uart.c .deps/hal/Src/stm32f4xx_hal_i2c.c .deps/hal/Src/stm32f4xx_hal_spi.c .deps/hal/Src/stm32f4xx_hal_adc.c .deps/hal/Src/stm32f4xx_hal_adc_ex.c .deps/tinyusb/src/tusb.c .deps/tinyusb/src/common/tusb_fifo.c .deps/tinyusb/src/device/usbd.c .deps/tinyusb/src/device/usbd_control.c .deps/tinyusb/src/class/vendor/vendor_device.c .deps/tinyusb/src/portable/synopsys/dwc2/dcd_dwc2.c .deps/tinyusb/src/portable/synopsys/dwc2/dwc2_common.c -nostdlib \
+	-Tfirmware/stm32f401rc.ld -Wl,--gc-sections,-z,noexecstack,-Map,build/debug/usb2box.map -lgcc -o build/debug/usb2box.elf
+ok
+test_shared_device_and_lease_safety (test_sdk.SDKTests.test_shared_device_and_lease_safety) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.170s
+
+OK
+mkdir -p build/release
+arm-none-eabi-gcc -Ifirmware/include -Ibuild/generated -DSTM32F401xC -DUSER_VECT_TAB_ADDRESS -DHSE_VALUE=0u -DUSB2BOX_VID=0 -DUSB2BOX_PID=0 -isystem /workspace/usb2box-tools/arm/usr/bin/../include/newlib -isystem .deps/tinyusb/src -isystem .deps/cmsis-core/CMSIS/Core/Include -isystem .deps/cmsis-device/Include -isystem .deps/hal/Inc -std=c11 -Wall -Wextra -Werror -mcpu=cortex-m4 -mthumb -ffreestanding -ffunction-sections -fdata-sections -Os firmware/src/startup.S firmware/src/main.c firmware/src/frame.c firmware/src/bsp.c firmware/src/clock_policy.c firmware/src/memory.c firmware/src/device.c firmware/src/app.c firmware/src/uart_service.c firmware/src/uart_stm32.c firmware/src/i2c_service.c firmware/src/i2c_stm32.c firmware/src/pwm_service.c firmware/src/pwm_stm32.c firmware/src/spi_service.c firmware/src/spi_stm32.c firmware/src/adc_service.c firmware/src/adc_stm32.c firmware/src/jobs.c firmware/src/resources.c firmware/src/usb_link.c firmware/src/usb_descriptors.c .deps/cmsis-device/Source/Templates/system_stm32f4xx.c .deps/hal/Src/stm32f4xx_hal.c .deps/hal/Src/stm32f4xx_hal_rcc.c .deps/hal/Src/stm32f4xx_hal_gpio.c .deps/hal/Src/stm32f4xx_hal_cortex.c .deps/hal/Src/stm32f4xx_hal_dma.c .deps/hal/Src/stm32f4xx_hal_uart.c .deps/hal/Src/stm32f4xx_hal_i2c.c .deps/hal/Src/stm32f4xx_hal_spi.c .deps/hal/Src/stm32f4xx_hal_adc.c .deps/hal/Src/stm32f4xx_hal_adc_ex.c .deps/tinyusb/src/tusb.c .deps/tinyusb/src/common/tusb_fifo.c .deps/tinyusb/src/device/usbd.c .deps/tinyusb/src/device/usbd_control.c .deps/tinyusb/src/class/vendor/vendor_device.c .deps/tinyusb/src/portable/synopsys/dwc2/dcd_dwc2.c .deps/tinyusb/src/portable/synopsys/dwc2/dwc2_common.c -nostdlib \
+	-Tfirmware/stm32f401rc.ld -Wl,--gc-sections,-z,noexecstack,-Map,build/release/usb2box.map -lgcc -o build/release/usb2box.elf
+arm-none-eabi-size build/debug/usb2box.elf
+   text	   data	    bss	    dec	    hex	filename
+  48220	     32	  31444	  79696	  13750	build/debug/usb2box.elf
+arm-none-eabi-gcc --version
+arm-none-eabi-gcc (15:14.2.rel1-1) 14.2.1 20241119
+Copyright (C) 2024 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+arm-none-eabi-size --version
+GNU size (2.44-3+23+b1) 2.44
+Copyright (C) 2025 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+arm-none-eabi-objcopy --version
+GNU objcopy (2.44-3+23+b1) 2.44
+Copyright (C) 2025 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+./build/host/test-frame
+frame vectors and 10000 deterministic mutations passed
+./build/host/test-clock
+clock profiles and simulated PLL start / HSI recovery passed
+./build/host/test-device
+device Mock Bulk framing, request wrap, backpressure and lease passed
+./build/host/test-runtime
+resource atomic reservation and bounded job deadlines, contention and cancellation passed
+./build/host/test-uart
+UART dual cross-loopback, wrap and overflow passed
+./build/host/test-i2c
+I2C dual master/slave combined transactions, events and timeout passed
+./build/host/test-pwm
+PWM independent frequency plans and deadline safe stop passed
+./build/host/test-spi
+SPI modes, 8/16 bit, held CS, chunked DMA mock and cancel passed
+./build/host/test-adc
+ADC scan, finite count, pre/post trigger, credit and overrun stop passed
+arm-none-eabi-objcopy -O binary build/debug/usb2box.elf build/debug/usb2box.bin
+arm-none-eabi-objcopy -O ihex build/debug/usb2box.elf build/debug/usb2box.hex
+arm-none-eabi-size build/release/usb2box.elf
+   text	   data	    bss	    dec	    hex	filename
+  40720	     32	  31436	  72188	  119fc	build/release/usb2box.elf
+arm-none-eabi-objcopy -O binary build/release/usb2box.elf build/release/usb2box.bin
+arm-none-eabi-objcopy -O ihex build/release/usb2box.elf build/release/usb2box.hex
+python3 tools/verify_arm_image.py arm-none-eabi-nm build/debug/usb2box.bin build/release/usb2box.bin
+build/debug/usb2box.bin: reset, SysTick and OTG vectors, stack bounds and no allocator verified
+build/release/usb2box.bin: reset, SysTick and OTG vectors, stack bounds and no allocator verified
+exit=0

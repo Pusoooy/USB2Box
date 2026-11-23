@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段：M9 实施进度见下文。**
+**当前阶段：M10 实施进度见下文。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -58,3 +58,7 @@ M7 为 d518154。实现 TIM2 与 DMA2 S4，随后通过共享 SDK 读取。模�
 ## M9
 
 M8 为 71e3243。使用 make mock-device 启动 C 模拟器，Python CLI 使用 --mock。Windows 真机由 PyUSB/libusb 访问两个 WinUSB 接口，需经 HIL 验证。
+
+## M10
+
+M9 为 93e8588。启动 python -m usb2xxx.gui --mock；使用同一份 SDK 与 C 模拟设备。Linux offscreen Qt 的字体缓存警告不影响测试。

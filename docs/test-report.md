@@ -66,3 +66,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M9
 
 `make -j2 verify` 退出 0。原生模拟进程执行五功能集成，覆盖冲突、租约安全停止、协议分片、异步采集和 CLI。构建 SDK wheel。WinUSB 实板 NOT_RUN。 [原始日志](evidence/m9-verify.log)
+
+## M10
+
+`make test-gui` 在 PySide6 6.9.3 offscreen 运行，连接共享模拟器并执行五功能页面操作、ADC 曲线和紧急停止。全量 `make -j2 verify` 通过，序列退出 0。Windows 真机未测试。 [原始日志](evidence/m10-verify.log)

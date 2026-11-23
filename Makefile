@@ -189,3 +189,7 @@ test-sdk: mock-device
 	PYTHONPATH=pc $(PYTHON) -m unittest discover -s tests -p 'test_sdk.py' -v
 
 test-host: test-sdk
+
+.PHONY: test-gui
+test-gui: mock-device
+	QT_QPA_PLATFORM=offscreen PYTHONPATH=pc $(PYTHON) -m unittest discover -s tests -p 'test_gui.py' -v
