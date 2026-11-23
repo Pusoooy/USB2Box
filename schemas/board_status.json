@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "mcu": "STM32F401RCT6",
+  "package": "LQFP64",
+  "board_visual_status": "BOARD_STYLE_CONFIRMED_BY_USER",
+  "board_visual_description": "Black PCB, USB Type-C, Black Pill style minimal development board visually matched user-confirmed assistant reference image",
+  "electrical_status": "BOARD_ELECTRICAL_UNVERIFIED",
+  "hse_frequency_mhz": null,
+  "usb_connector_wiring_verified": false,
+  "usb_enumeration_verified": false,
+  "pin_headers_verified": false,
+  "hardware_testing_performed": false,
+  "evidence": "user confirmation of reference image in conversation",
+  "notes": "Do not assume 48-pin Black Pill pinout; consult DS9716/RM0368 and check actual board."
+}
