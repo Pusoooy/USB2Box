@@ -70,3 +70,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M10
 
 `make test-gui` 在 PySide6 6.9.3 offscreen 运行，连接共享模拟器并执行五功能页面操作、ADC 曲线和紧急停止。全量 `make -j2 verify` 通过，序列退出 0。Windows 真机未测试。 [原始日志](evidence/m10-verify.log)
+
+## M11
+
+`make test-mcp` 使用官方客户端启动两个 stdio 子进程，验证工具 schema、资源读取、拒绝未授权写、PWM 限时、分块采集和安全停止。回归和交叉构建退出 0。实板 MCP NOT_RUN。 [原始日志](evidence/m11-verify.log)

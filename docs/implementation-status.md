@@ -15,7 +15,7 @@
 | M8 | ADC1 | HOST_MOCK_PASS | ADC1 扫描、软件/定时器触发，有限及持续采集、超量停止，0x82 credits |
 | M9 | Python SDK/CLI | HOST_MOCK_PASS | 同步/异步 API、客户端独占、共享 C 模拟器与 wheel；Windows 无实测 |
 | M10 | PySide6 GUI | HOST_MOCK_PASS | 六页共享 SDK 工作台，后台线程与 ADC 曲线，Linux offscreen 冒烟通过 |
-| M11 | MCP stdio Server | NOT_IMPLEMENTED | Agent 安全与资源访问控制 |
+| M11 | MCP stdio Server | HOST_MOCK_PASS | 16 个 stdio 工具、能力与状态资源、输出限额和权限检查 |
 | M12 | 集成/离线包/V0 发布 | NOT_IMPLEMENTED | 完整工具链依法打包、SHA256 |
 
 状态标签：NOT_IMPLEMENTED、IN_PROGRESS、SOFTWARE_VERIFIED、WAITING_HARDWARE、HARDWARE_VERIFIED、BLOCKED、FAILED。必须以命令输出、提交SHA、原始日志支撑通过状态。

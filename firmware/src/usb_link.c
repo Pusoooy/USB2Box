@@ -27,7 +27,7 @@ static void send_stream(void)
         const uint16_t payload = adc_stream_payload(stream + FRAME_HEADER_SIZE);
         if (!payload) return;
         frame_header header = {
-            .type = 4, .service = 6, .opcode = 7, .flags = FLAG_FIRST | FLAG_LAST,
+            .type = 4, .service = SERVICE_ADC, .opcode = 7, .flags = FLAG_FIRST | FLAG_LAST,
             .length = payload, .total = payload, .stream_id = 1,
             .sequence = stream_sequence++,
         };

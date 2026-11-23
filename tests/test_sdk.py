@@ -71,8 +71,8 @@ class SDKTests(unittest.TestCase):
         async def run():
             async with await USB2XXX.open_async(mock=True) as dev:
                 self.assertEqual((await dev.capabilities())["version"], (1, 0))
-                await dev.call(6, 1, bytes([12, 1, 10, 2]))
-                await dev.call(6, 3, (100000).to_bytes(4, "little") + bytes([8, 0, 0, 0, 0, 0]))
+                await dev.call(5, 1, bytes([12, 1, 10, 2]))
+                await dev.call(5, 3, (100000).to_bytes(4, "little") + bytes([8, 0, 0, 0, 0, 0]))
                 blocks = [block async for block in dev.capture_stream()]
                 self.assertEqual(sum(len(block.samples) for block in blocks), 8)
         asyncio.run(run())

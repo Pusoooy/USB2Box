@@ -81,7 +81,7 @@ def receive(transport, endpoint: int, timeout: float,
     if endpoint == 0x81:
         if (kind, stream, sequence) != (2, 0, 0) or expected != (service, opcode, request):
             raise ProtocolError("unexpected response ID or opcode")
-    elif (kind, service, opcode, request, stream, status) != (4, 6, 7, 0, 1, 0):
+    elif (kind, service, opcode, request, stream, status) != (4, 5, 7, 0, 1, 0):
         raise ProtocolError("unexpected stream frame")
     remaining = end - monotonic()
     if remaining <= 0:

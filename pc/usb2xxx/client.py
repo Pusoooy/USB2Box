@@ -15,7 +15,7 @@ from .transport import BulkTransport, MockTransport, Transport, discover
 
 U16 = struct.Struct("<H")
 U32 = struct.Struct("<I")
-SYS, I2C, UART, PWM, SPI, ADC = 0, 1, 3, 4, 5, 6
+SYS, I2C, UART, PWM, SPI, ADC = 0, 1, 2, 3, 4, 5
 
 
 @dataclass(frozen=True)

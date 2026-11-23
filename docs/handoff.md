@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段：M10 实施进度见下文。**
+**当前阶段：M11 实施进度见下文。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -37,7 +37,7 @@ STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系
 
 ## M4
 
-M3 为 3206d11。已接入 USART1/2 双路 DMA 和 USB 服务 3。下一阶段使用 I²C 中断以避免占用 DMA1 S5/S6。
+M3 为 3206d11。已接入 USART1/2 双路 DMA 和 UART USB 服务号已在 M11 统一为 2。下一阶段使用 I²C 中断以避免占用 DMA1 S5/S6。
 
 ## M5
 
@@ -62,3 +62,7 @@ M8 为 71e3243。使用 make mock-device 启动 C 模拟器，Python CLI 使用 
 ## M10
 
 M9 为 93e8588。启动 python -m usb2xxx.gui --mock；使用同一份 SDK 与 C 模拟设备。Linux offscreen Qt 的字体缓存警告不影响测试。
+
+## M11
+
+M10 为 18ec9a4。MCP 1.20.0 兼容 Pydantic 2.12.5，默认只读，显式配置合法设备的 VID/PID 和允许的序列号。服务编号统一回既有协议表。
