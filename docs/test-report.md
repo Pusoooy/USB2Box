@@ -62,3 +62,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M8
 
 `make -j2 verify` 退出 0。模拟扫描、257 样本有限采集、预/后触发、credit 及过载停止。Release 静态 RAM 31,468 B。实测速率和精度 NOT_RUN。 [原始日志](evidence/m8-verify.log)
+
+## M9
+
+`make -j2 verify` 退出 0。原生模拟进程执行五功能集成，覆盖冲突、租约安全停止、协议分片、异步采集和 CLI。构建 SDK wheel。WinUSB 实板 NOT_RUN。 [原始日志](evidence/m9-verify.log)

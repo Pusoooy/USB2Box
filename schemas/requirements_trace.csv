@@ -99,7 +99,7 @@
 "X20","A","日志级别/计数/状态/有界诊断缓冲/异步事件","NOT_IMPLEMENTED","NOT_RUN",""
 "X21","A","优先局部恢复，必要时重置会话，整机复位最后手段","NOT_IMPLEMENTED","NOT_RUN",""
 "X22","A","实测Bulk吞吐、命令延迟、公平性、丢包、长期稳定","NOT_IMPLEMENTED","NOT_RUN",""
-"X23","A","Python同步/异步SDK、类型标注、异常、CLI、安装包","NOT_IMPLEMENTED","NOT_RUN",""
+"X23","A","Python同步/异步SDK、类型标注、异常、CLI、安装包","HOST_MOCK_PASS","见 M9 验证记录","pc/usb2xxx; host/mock_device.c; tests/test_sdk.py"
 "X24","A","解析单测/模拟设备/异常模糊/实板回环/并发压测","NOT_IMPLEMENTED","NOT_RUN",""
 "F01","A","HAL为主、关键路径LL","ARM_BUILD_PASS","make test-arm (BSP)","firmware/src/bsp.c"
 "F02","A","优先TinyUSB，失败时评估ST USB Device","ARM_BUILD_PASS","make test-arm","tools/arm-dependencies.lock; firmware/src/usb_link.c"

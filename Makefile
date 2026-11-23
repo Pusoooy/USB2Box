@@ -174,3 +174,18 @@ test-adc: build/host/test-adc
 	./build/host/test-adc
 
 test-host: test-adc
+
+MOCK_SOURCES := $(sort $(HOST_UART_SOURCES) $(HOST_I2C_SOURCES) $(HOST_PWM_SOURCES) $(HOST_SPI_SOURCES) $(HOST_ADC_SOURCES) firmware/src/app.c)
+MOCK_EXE ?= build/host/mock-device
+$(MOCK_EXE): host/mock_device.c $(MOCK_SOURCES) $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
+	mkdir -p $(@D)
+	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
+
+.PHONY: mock-device
+mock-device: $(MOCK_EXE)
+
+.PHONY: test-sdk
+test-sdk: mock-device
+	PYTHONPATH=pc $(PYTHON) -m unittest discover -s tests -p 'test_sdk.py' -v
+
+test-host: test-sdk
