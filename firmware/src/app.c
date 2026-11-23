@@ -2,12 +2,13 @@
 #include "uart_service.h"
 #include "i2c_service.h"
 #include "pwm_service.h"
+#include "spi_service.h"
 
 static resources pool;
 
 void app_init(void) { resources_init(&pool); }
-void app_stop(void) { pwm_stop_all(&pool); uart_stop_all(&pool); i2c_stop_all(&pool); }
-void app_poll(uint32_t now) { uart_poll(); i2c_poll(now); pwm_poll(now); }
+void app_stop(void) { spi_stop_all(&pool); pwm_stop_all(&pool); uart_stop_all(&pool); i2c_stop_all(&pool); }
+void app_poll(uint32_t now) { uart_poll(); i2c_poll(now); pwm_poll(now); spi_poll(now); }
 
 uint16_t app_command(uint8_t service, uint8_t opcode, const uint8_t *input,
                      uint16_t length, uint8_t *output, uint16_t *written, uint32_t now)
@@ -17,6 +18,7 @@ uint16_t app_command(uint8_t service, uint8_t opcode, const uint8_t *input,
         return i2c_job_command(opcode, wire_u32(input), output, written);
     if (service == 3) return uart_command(&pool, opcode, input, length, output, written);
     if (service == 4) return pwm_command(&pool, opcode, input, length, output, written, now);
+    if (service == 5) return spi_command(&pool, opcode, input, length, output, written, now);
     if (service == 0 && opcode == SYS_RESOURCES && length == 0) {
         for (unsigned i = 0; i < RESOURCE_COUNT; ++i) output[i] = pool.owner[i];
         *written = RESOURCE_COUNT;

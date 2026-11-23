@@ -11,7 +11,7 @@
 | M4 | 双UART | HOST_MOCK_PASS | USART1/2 真驱动交叉链接，通过双向模拟回环和环形缓冲测试 |
 | M5 | 双I²C | HOST_MOCK_PASS | 双总线中断、组合事务、从机缓存和事件，实板弱上拉待测 |
 | M6 | 双PWM | HOST_MOCK_PASS | TIM5/TIM3 独立频率组、定时和低电平安全停机；物理脉冲待验证 |
-| M7 | SPI1 | NOT_IMPLEMENTED | SPI2 等条件扩展 |
+| M7 | SPI1 | HOST_MOCK_PASS | SPI1 主机 4 模式及片选资源，DMA 全双工、分段和取消 |
 | M8 | ADC1 | NOT_IMPLEMENTED | 有界缓冲，连续 100kSPS 为实测目标 |
 | M9 | Python SDK / CLI | NOT_IMPLEMENTED | Windows 10/11 |
 | M10 | Windows GUI | NOT_IMPLEMENTED | PySide6 计划 |

@@ -33,7 +33,8 @@
 .word I2C1_ER_IRQHandler
 .word I2C2_EV_IRQHandler
 .word I2C2_ER_IRQHandler
-.rept 2
+.word SPI1_IRQHandler
+.rept 1
 .word Default_Handler
 .endr
 .word USART1_IRQHandler
@@ -42,11 +43,16 @@
 .word Default_Handler
 .endr
 .word TIM5_IRQHandler
-.rept 7
+.rept 5
+.word Default_Handler
+.endr
+.word DMA2_Stream0_IRQHandler
+.rept 1
 .word Default_Handler
 .endr
 .word DMA2_Stream2_IRQHandler
-.rept 8
+.word DMA2_Stream3_IRQHandler
+.rept 7
 .word Default_Handler
 .endr
 .word OTG_FS_IRQHandler

@@ -54,3 +54,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M6
 
 `make -j2 verify` 退出 0。检查定时器量化、极端占空比和回绕时的双组独立停机。波形、脉冲计数及输入捕获 NOT_RUN。 [原始日志](evidence/m6-verify.log)
+
+## M7
+
+`make -j2 verify` 退出 0。四种模式每种保持片选四个 256 B 分段，并验证取消。时序和实板回环 NOT_RUN。 [原始日志](evidence/m7-verify.log)
