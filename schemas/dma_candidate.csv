@@ -1,0 +1,13 @@
+peripheral_direction,legal_candidates,risk_notes
+"ADC1 RX","DMA2 Stream0 Channel0 **或** DMA2 Stream4 Channel0","S0会与SPI1 RX等冲突，S4可能与其他用途竞争"
+"SPI1 RX","DMA2 Stream0 Channel3 **或** DMA2 Stream2 Channel3","S0争ADC1，S2争USART1 RX"
+"SPI1 TX","DMA2 Stream3 Channel3 **或** DMA2 Stream5 Channel3","S5与USART1 RX有竞争"
+"USART1 RX","DMA2 Stream2 Channel4 **或** DMA2 Stream5 Channel4","与SPI1/可选USART6等冲突"
+"USART1 TX","DMA2 Stream7 Channel4","若独占可稳定使用"
+"USART2 RX","DMA1 Stream5 Channel4","与若干DMA1外设候选冲突"
+"USART2 TX","DMA1 Stream6 Channel4","与TIM4 Update等候选冲突"
+"I2C1 RX","DMA1 Stream0 Channel1 **或** DMA1 Stream5 Channel1","需再核对完整请求表和其他启用功能"
+"I2C1 TX","DMA1 Stream6 Channel1 **或** DMA1 Stream7 Channel1","与USART2 TX/TIM等冲突"
+"I2C2 RX","DMA1 Stream2 Channel7 **或** DMA1 Stream3 Channel7","芯片仅允许上述映射"
+"I2C2 TX","DMA1 Stream7 Channel7","与I2C1 TX等可能发生冲突"
+"TIM5/TIM3 DMA","按RM0368与具体更新事件确定","不保证软件选择任意DMA流"
