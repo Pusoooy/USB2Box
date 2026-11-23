@@ -9,6 +9,8 @@
 #define HAL_UART_MODULE_ENABLED
 #define HAL_I2C_MODULE_ENABLED
 #define HAL_SPI_MODULE_ENABLED
+#define HAL_ADC_MODULE_ENABLED
+#define HAL_TIM_MODULE_ENABLED
 #define HAL_PWR_MODULE_ENABLED
 #define HAL_RCC_MODULE_ENABLED
 
@@ -29,6 +31,8 @@
 #include "stm32f4xx_hal_uart.h"
 #include "stm32f4xx_hal_i2c.h"
 #include "stm32f4xx_hal_spi.h"
+#include "stm32f4xx_hal_adc.h"
+#include "stm32f4xx_hal_tim.h"
 #include "stm32f4xx_hal_pwr.h"
 
 #define assert_param(expr) ((void)0u)

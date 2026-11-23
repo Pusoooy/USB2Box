@@ -12,7 +12,7 @@
 | M5 | 双I²C | HOST_MOCK_PASS | 双总线中断、组合事务、从机缓存和事件，实板弱上拉待测 |
 | M6 | 双PWM | HOST_MOCK_PASS | TIM5/TIM3 独立频率组、定时和低电平安全停机；物理脉冲待验证 |
 | M7 | SPI1 | HOST_MOCK_PASS | SPI1 主机 4 模式及片选资源，DMA 全双工、分段和取消 |
-| M8 | ADC1 | NOT_IMPLEMENTED | 有界缓冲，连续 100kSPS 为实测目标 |
+| M8 | ADC1 | HOST_MOCK_PASS | ADC1 扫描、软件/定时器触发，有限及持续采集、超量停止，0x82 credits |
 | M9 | Python SDK / CLI | NOT_IMPLEMENTED | Windows 10/11 |
 | M10 | Windows GUI | NOT_IMPLEMENTED | PySide6 计划 |
 | M11 | MCP stdio Server | NOT_IMPLEMENTED | Agent 安全与资源访问控制 |

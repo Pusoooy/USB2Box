@@ -22,7 +22,8 @@
 .endr
 .word DMA1_Stream5_IRQHandler
 .word DMA1_Stream6_IRQHandler
-.rept 11
+.word ADC_IRQHandler
+.rept 10
 .word Default_Handler
 .endr
 .word TIM3_IRQHandler
@@ -52,7 +53,8 @@
 .endr
 .word DMA2_Stream2_IRQHandler
 .word DMA2_Stream3_IRQHandler
-.rept 7
+.word DMA2_Stream4_IRQHandler
+.rept 6
 .word Default_Handler
 .endr
 .word OTG_FS_IRQHandler

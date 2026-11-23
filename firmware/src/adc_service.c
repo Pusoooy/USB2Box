@@ -1,0 +1,168 @@
+#include "adc_service.h"
+
+static adc_config config;
+static uint16_t cache[ADC_CACHE];
+static uint32_t produced, consumed, target, dropped, rate;
+static uint16_t pre_trigger, post_trigger, credits;
+static bool configured, running, awaiting_trigger;
+
+static void stop(void)
+{
+    if (running) adc_driver_stop();
+    running = awaiting_trigger = false;
+}
+
+void adc_stop_all(resources *pool)
+{
+    stop();
+    configured = false;
+    credits = 0;
+    produced = consumed = 0;
+    resource_release(pool, 8);
+}
+
+void adc_poll(void)
+{
+    if (!running) return;
+    uint16_t block[ADC_BLOCK];
+    uint32_t lost = 0;
+    const uint16_t count = adc_driver_read(block, &lost);
+    if (lost) {
+        dropped += lost;
+        stop();
+        return;
+    }
+    for (unsigned i = 0; i < count; ++i) {
+        if (produced - consumed == ADC_CACHE) {
+            if (!awaiting_trigger) {
+                dropped += count - i;
+                stop();
+                return;
+            }
+            ++consumed;
+        }
+        cache[produced++ % ADC_CACHE] = block[i];
+        if (!awaiting_trigger && target && produced == target) {
+            stop();
+            return;
+        }
+    }
+}
+
+static const uint8_t channel_pin[] = {
+    RESOURCE_PIN('A', 0), RESOURCE_PIN('A', 1), RESOURCE_PIN('A', 2), RESOURCE_PIN('A', 3),
+    RESOURCE_PIN('A', 4), RESOURCE_PIN('A', 5), RESOURCE_PIN('A', 6), RESOURCE_PIN('A', 7),
+    RESOURCE_PIN('B', 0), RESOURCE_PIN('B', 1), RESOURCE_PIN('C', 0), RESOURCE_PIN('C', 1),
+    RESOURCE_PIN('C', 2), RESOURCE_PIN('C', 3), RESOURCE_PIN('C', 4), RESOURCE_PIN('C', 5),
+};
+
+static uint16_t configure(resources *pool, const uint8_t *input, uint16_t length)
+{
+    if (length < 4 || !input[1] || input[1] > 8 || length != 2u + 2u * input[1])
+        return STATUS_VALUE;
+    if (configured) return STATUS_BUSY;
+    adc_config next = {.resolution = input[0] ? input[0] : 12, .ranks = input[1]};
+    if (next.resolution != 6 && next.resolution != 8 &&
+        next.resolution != 10 && next.resolution != 12) return STATUS_VALUE;
+
+    resource_plan plan = {0};
+    resource_add(&plan, RESOURCE_ADC);
+    resource_add(&plan, RESOURCE_TIMER(2));
+    if (!resource_dma_add(&plan, pool, 8, "ADC1", 2, 4, 0)) return STATUS_BUSY;
+    bool temp = false, vbat = false;
+    for (unsigned i = 0; i < next.ranks; ++i) {
+        const uint8_t channel = input[2 + 2 * i], time = input[3 + 2 * i];
+        if (channel > 18 || time > 7 || (channel >= 16 && time < 7)) return STATUS_VALUE;
+        if (channel < 16 && !resource_add(&plan, channel_pin[channel])) return STATUS_VALUE;
+        temp |= channel == 16;
+        vbat |= channel == 18;
+        next.channels[i] = channel;
+        next.times[i] = time;
+    }
+    if (temp && vbat) return STATUS_VALUE;
+    uint8_t conflict;
+    const uint16_t status = resource_reserve(pool, &plan, 8, &conflict);
+    if (status != STATUS_OK) return status;
+    config = next;
+    configured = true;
+    return STATUS_OK;
+}
+
+static uint16_t start(uint32_t hz, uint16_t samples, uint16_t pre, uint16_t post)
+{
+    if (!configured || running) return STATUS_BUSY;
+    if (hz > 100000 || (hz && hz < config.ranks) || samples > ADC_CACHE ||
+        (pre || post ? samples || !post || (uint32_t)pre + post > ADC_CACHE : false))
+        return STATUS_VALUE;
+    if (!hz && (samples != 1 || config.ranks != 1 || pre || post)) return STATUS_VALUE;
+    produced = consumed = dropped = 0;
+    target = samples;
+    pre_trigger = pre;
+    post_trigger = post;
+    awaiting_trigger = post != 0;
+    credits = 0;
+    rate = adc_driver_start(&config, hz, post ? 0 : samples);
+    running = rate != 0;
+    if (!running) awaiting_trigger = false;
+    return running ? STATUS_OK : STATUS_IO;
+}
+
+static uint16_t read_samples(uint8_t *out, uint16_t limit)
+{
+    const uint32_t available = awaiting_trigger ? 0 : produced - consumed;
+    if (limit > available) limit = (uint16_t)available;
+    wire_put32(out, rate);
+    wire_put32(out + 4, consumed);
+    wire_put32(out + 8, dropped);
+    wire_put16(out + 12, limit);
+    out[14] = config.resolution;
+    out[15] = (uint8_t)((running ? 1 : 0) | (awaiting_trigger ? 2 : 0));
+    for (unsigned i = 0; i < limit; ++i)
+        wire_put16(out + 16 + 2 * i, cache[consumed++ % ADC_CACHE]);
+    return (uint16_t)(16 + 2 * limit);
+}
+
+uint16_t adc_stream_payload(uint8_t *out)
+{
+    if (!credits || awaiting_trigger || produced == consumed) return 0;
+    --credits;
+    return read_samples(out, (DEVICE_FRAGMENT - 16) / 2);
+}
+
+uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
+                     uint16_t length, uint8_t *out, uint16_t *written)
+{
+    switch (opcode) {
+    case 1:
+        return configure(pool, input, length);
+    case 2:
+        return length == 0 ? start(0, 1, 0, 0) : STATUS_VALUE;
+    case 3:
+        return length == 10 ? start(wire_u32(input), wire_u16(input + 4),
+                                    wire_u16(input + 6), wire_u16(input + 8)) : STATUS_VALUE;
+    case 4:
+        if (length != 0) return STATUS_VALUE;
+        adc_stop_all(pool);
+        return STATUS_OK;
+    case 5:
+        if (length != 0 || !awaiting_trigger) return STATUS_VALUE;
+        if (produced - consumed > pre_trigger) consumed = produced - pre_trigger;
+        target = produced + post_trigger;
+        awaiting_trigger = false;
+        return STATUS_OK;
+    case 6: {
+        if (length != 2 || !configured) return STATUS_VALUE;
+        const uint16_t count = wire_u16(input);
+        if (count > (DEVICE_FRAGMENT - 16) / 2) return STATUS_VALUE;
+        *written = read_samples(out, count);
+        return STATUS_OK;
+    }
+    case 7:
+        if (length != 2 || !configured || wire_u16(input) > 16u - credits)
+            return STATUS_VALUE;
+        credits += wire_u16(input);
+        return STATUS_OK;
+    default:
+        return STATUS_OPCODE;
+    }
+}

@@ -58,3 +58,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M7
 
 `make -j2 verify` 退出 0。四种模式每种保持片选四个 256 B 分段，并验证取消。时序和实板回环 NOT_RUN。 [原始日志](evidence/m7-verify.log)
+
+## M8
+
+`make -j2 verify` 退出 0。模拟扫描、257 样本有限采集、预/后触发、credit 及过载停止。Release 静态 RAM 31,468 B。实测速率和精度 NOT_RUN。 [原始日志](evidence/m8-verify.log)
