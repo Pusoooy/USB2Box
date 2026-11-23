@@ -30,7 +30,7 @@ TINYUSB_SOURCES := $(addprefix $(ARM_DEPS)/tinyusb/src/,tusb.c common/tusb_fifo.
 ARM_VENDOR_SOURCES := $(ARM_DEPS)/cmsis-device/Source/Templates/system_stm32f4xx.c $(HAL_SOURCES) $(TINYUSB_SOURCES)
 ARM_SOURCES := firmware/src/startup.S firmware/src/main.c firmware/src/frame.c \
 	firmware/src/bsp.c firmware/src/clock_policy.c firmware/src/memory.c \
-	firmware/src/device.c firmware/src/app.c firmware/src/uart_service.c firmware/src/uart_stm32.c firmware/src/i2c_service.c firmware/src/i2c_stm32.c firmware/src/jobs.c firmware/src/resources.c firmware/src/usb_link.c firmware/src/usb_descriptors.c \
+	firmware/src/device.c firmware/src/app.c firmware/src/uart_service.c firmware/src/uart_stm32.c firmware/src/i2c_service.c firmware/src/i2c_stm32.c firmware/src/pwm_service.c firmware/src/pwm_stm32.c firmware/src/jobs.c firmware/src/resources.c firmware/src/usb_link.c firmware/src/usb_descriptors.c \
 	$(ARM_VENDOR_SOURCES)
 ARM_HEADERS := $(wildcard firmware/include/*.h firmware/src/*.h)
 ARM_LINKER := firmware/stm32f401rc.ld
@@ -141,3 +141,14 @@ test-i2c: build/host/test-i2c
 	./build/host/test-i2c
 
 test-host: test-i2c
+
+HOST_PWM_SOURCES := firmware/src/pwm_service.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/pwm_mock.c
+build/host/test-pwm: tests/test_pwm.c $(HOST_PWM_SOURCES) $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
+	mkdir -p $(@D)
+	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
+
+.PHONY: test-pwm
+test-pwm: build/host/test-pwm
+	./build/host/test-pwm
+
+test-host: test-pwm

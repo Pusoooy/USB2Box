@@ -22,7 +22,11 @@
 .endr
 .word DMA1_Stream5_IRQHandler
 .word DMA1_Stream6_IRQHandler
-.rept 13
+.rept 11
+.word Default_Handler
+.endr
+.word TIM3_IRQHandler
+.rept 1
 .word Default_Handler
 .endr
 .word I2C1_EV_IRQHandler
@@ -34,7 +38,11 @@
 .endr
 .word USART1_IRQHandler
 .word USART2_IRQHandler
-.rept 19
+.rept 11
+.word Default_Handler
+.endr
+.word TIM5_IRQHandler
+.rept 7
 .word Default_Handler
 .endr
 .word DMA2_Stream2_IRQHandler

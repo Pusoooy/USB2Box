@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段：M5 实施进度见下文。**
+**当前阶段：M6 实施进度见下文。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -42,3 +42,7 @@ M3 为 3206d11。已接入 USART1/2 双路 DMA 和 USB 服务 3。下一阶段�
 ## M5
 
 M4 为 39b880b。USB 服务 1 已接入异步队列。暂以从机最新接收事件和主机已读字节报告部分完成。
+
+## M6
+
+M5 为 7b2d04c。PWM 租约停止走公共 app_stop()。有限脉冲比较中断暂有 10 µs 最小时隙，需实板测量，之后补输入捕获。

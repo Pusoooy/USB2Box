@@ -50,3 +50,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M5
 
 `make -j2 verify` 退出 0，模拟总线交换主从角色，验证组合读写、接收事件及超时。PCB 上拉及数据波形 NOT_RUN。 [原始日志](evidence/m5-verify.log)
+
+## M6
+
+`make -j2 verify` 退出 0。检查定时器量化、极端占空比和回绕时的双组独立停机。波形、脉冲计数及输入捕获 NOT_RUN。 [原始日志](evidence/m6-verify.log)

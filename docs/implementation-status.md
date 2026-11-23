@@ -10,7 +10,7 @@
 | M3 | DMA/TIM/GPIO 资源管理与任务队列 | HOST_MOCK_PASS | 原子预留、合法候选、分通道排队、超时和取消通过；驱动接入随后续阶段 |
 | M4 | 双UART | HOST_MOCK_PASS | USART1/2 真驱动交叉链接，通过双向模拟回环和环形缓冲测试 |
 | M5 | 双I²C | HOST_MOCK_PASS | 双总线中断、组合事务、从机缓存和事件，实板弱上拉待测 |
-| M6 | PWM x2 | NOT_IMPLEMENTED | TIM5/TIM3 候选 |
+| M6 | 双PWM | HOST_MOCK_PASS | TIM5/TIM3 独立频率组、定时和低电平安全停机；物理脉冲待验证 |
 | M7 | SPI1 | NOT_IMPLEMENTED | SPI2 等条件扩展 |
 | M8 | ADC1 | NOT_IMPLEMENTED | 有界缓冲，连续 100kSPS 为实测目标 |
 | M9 | Python SDK / CLI | NOT_IMPLEMENTED | Windows 10/11 |
