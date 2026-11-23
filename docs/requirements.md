@@ -47,3 +47,7 @@
 
 
 ---
+
+## 需求追踪标识
+
+`schemas/requirements_trace.csv` 中的 决策 编号与 `docs/decisions.md` 的 150 项决定逐条对应。追踪状态和证据随里程碑维护。GUI-01 和 MCP-01 追踪已确认的 GUI 与 MCP 交付。

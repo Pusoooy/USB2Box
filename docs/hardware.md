@@ -19,7 +19,7 @@
 | USB | USB OTG FS | PA11 DM, PA12 DP | AF10 | 需核对连接器接线、VBUS检测及供电、USB时钟 | PCB待确认 |
 | SWD | SWDIO, SWCLK | PA13, PA14 | AF0 | 预留调试，不可动态抢占 | 芯片确定/板待确认 |
 | I²C #1 | I2C1 | PB8 SCL, PB9 SDA | AF4 open-drain | 仅内部弱上拉；与TIM4 CH3/CH4冲突 | PCB待确认 |
-| I²C #2 | I2C2 | PB10 SCL, PB11 SDA | AF4 open-drain | 与TIM2 CH3/CH4等候选功能冲突 | PCB待确认 |
+| I²C #2 | I2C2 | PB10 SCL, PB3 SDA | AF4/AF9 open-drain | PB3 与 SWO 互斥，保留两线 SWD | PCB待确认 |
 | UART #1 | USART1 | PB6 TX, PB7 RX | AF7 | 与TIM4 CH1/CH2及I2C1备选映射冲突 | PCB待确认 |
 | UART #2 | USART2 | PA2 TX, PA3 RX | AF7 | 与ADC2/3, TIM2/5候选通道冲突 | PCB待确认 |
 | PWM #1 | TIM5 CH1 | PA0 | AF2 | 32位TIM5独立频率组；占用ADC0 | PCB待确认 |
@@ -32,7 +32,7 @@
 | 扩展SPI | SPI3 | PC10 SCK/PC11 MISO/PC12 MOSI | AF6 | 按LQFP64封装和板引出再核对；属P2 | PCB待确认 |
 | 扩展UART | USART6 | PC6 TX/PC7 RX等 | AF8 | 与基础PWM #2直接冲突，不能无条件并发 | PCB待确认 |
 
-**上述映射引用DS9716 Table 8/9中AF定义；是否在LQFP64具体引脚存在并被PCB接出，必须由板卡原理图/实拍逐条验证。** 当同时承诺I²C1+I²C2、USART1+USART2、TIM5+TIM3、SPI1时，这份候选方案在GPIO引脚复用上没有直接重叠，仍不等于DMA/总线带宽全并发保证。
+**上述映射已用 ST 官方封装与 AF XML 交叉检查，详见 M0 资源审查；是否在LQFP64具体引脚存在并被PCB接出，必须由板卡原理图/实拍逐条验证。** 当同时承诺I²C1+I²C2、USART1+USART2、TIM5+TIM3、SPI1时，这份候选方案在GPIO引脚复用上没有直接重叠，仍不等于DMA/总线带宽全并发保证。
 
 ## 固定保留与动态分配边界
 
@@ -58,7 +58,7 @@
 | I2C2 TX | DMA1 Stream7 Channel7 | 与I2C1 TX等可能发生冲突 |
 | TIM5/TIM3 DMA | 按RM0368与具体更新事件确定 | 不保证软件选择任意DMA流 |
 
-此表只列部份常用候选；Codex 必须生成**官方完整二维DMA请求矩阵**，通过脚本校验合法映射与分配冲突，不得在运行时任意调换Channel。UART RX保持DMA优先；I²C小事务必要时可中断降级；ADC连续捕获不得在没有确认中断吞吐能力的情况下“透明降级”。
+此表只列部份常用候选；完整候选矩阵见 `schemas/dma_matrix.csv`，已运行静态分配测试，仍待对照 RM0368 原表，不得在运行时任意调换Channel。UART RX保持DMA优先；I²C小事务必要时可中断降级；ADC连续捕获不得在没有确认中断吞吐能力的情况下“透明降级”。
 
 ## ADC候选输入的占用说明
 

@@ -1,0 +1,48 @@
+rm -rf build
+arm-none-eabi-gcc --version
+arm-none-eabi-gcc (15:14.2.rel1-1) 14.2.1 20241119
+Copyright (C) 2024 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+arm-none-eabi-size --version
+GNU size (2.44-3+23+b1) 2.44
+Copyright (C) 2025 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+arm-none-eabi-objcopy --version
+GNU objcopy (2.44-3+23+b1) 2.44
+Copyright (C) 2025 Free Software Foundation, Inc.
+This program is free software; you may redistribute it under the terms of
+the GNU General Public License version 3 or (at your option) any later version.
+This program has absolutely no warranty.
+python3 -m unittest discover -s tests -p 'test_resources.py' -v
+test_dma_pair_and_cross_service_allocations (test_resources.ResourceTests.test_dma_pair_and_cross_service_allocations) ... ok
+test_package_and_gpio_conflicts (test_resources.ResourceTests.test_package_and_gpio_conflicts) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+
+OK
+mkdir -p build/host
+cc -Ifirmware/include -std=c11 -Wall -Wextra -Werror -g  tests/test_frame.c firmware/src/frame.c  -o build/host/test-frame
+./build/host/test-frame
+frame vectors and 10000 deterministic mutations passed
+mkdir -p build/debug
+arm-none-eabi-gcc -Ifirmware/include -std=c11 -Wall -Wextra -Werror -mcpu=cortex-m4 -mthumb -ffreestanding -ffunction-sections -fdata-sections -Og -g3 firmware/src/startup.S firmware/src/main.c firmware/src/frame.c -nostdlib \
+	-Tfirmware/stm32f401rc.ld -Wl,--gc-sections,-z,noexecstack,-Map,build/debug/usb2box.map -o build/debug/usb2box.elf
+arm-none-eabi-size build/debug/usb2box.elf
+   text	   data	    bss	    dec	    hex	filename
+    480	      0	      0	    480	    1e0	build/debug/usb2box.elf
+arm-none-eabi-objcopy -O binary build/debug/usb2box.elf build/debug/usb2box.bin
+arm-none-eabi-objcopy -O ihex build/debug/usb2box.elf build/debug/usb2box.hex
+mkdir -p build/release
+arm-none-eabi-gcc -Ifirmware/include -std=c11 -Wall -Wextra -Werror -mcpu=cortex-m4 -mthumb -ffreestanding -ffunction-sections -fdata-sections -Os firmware/src/startup.S firmware/src/main.c firmware/src/frame.c -nostdlib \
+	-Tfirmware/stm32f401rc.ld -Wl,--gc-sections,-z,noexecstack,-Map,build/release/usb2box.map -o build/release/usb2box.elf
+arm-none-eabi-size build/release/usb2box.elf
+   text	   data	    bss	    dec	    hex	filename
+    480	      0	      0	    480	    1e0	build/release/usb2box.elf
+arm-none-eabi-objcopy -O binary build/release/usb2box.elf build/release/usb2box.bin
+arm-none-eabi-objcopy -O ihex build/release/usb2box.elf build/release/usb2box.hex
+exit=0

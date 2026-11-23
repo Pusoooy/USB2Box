@@ -318,7 +318,7 @@
 | USB | USB OTG FS | PA11 DM, PA12 DP | AF10 | 需核对连接器接线、VBUS检测及供电、USB时钟 | PCB待确认 |
 | SWD | SWDIO, SWCLK | PA13, PA14 | AF0 | 预留调试，不可动态抢占 | 芯片确定/板待确认 |
 | I²C #1 | I2C1 | PB8 SCL, PB9 SDA | AF4 open-drain | 仅内部弱上拉；与TIM4 CH3/CH4冲突 | PCB待确认 |
-| I²C #2 | I2C2 | PB10 SCL, PB11 SDA | AF4 open-drain | 与TIM2 CH3/CH4等候选功能冲突 | PCB待确认 |
+| I²C #2 | I2C2 | PB10 SCL, PB3 SDA | AF4/AF9 open-drain | PB3 与 SWO 互斥，保留两线 SWD | PCB待确认 |
 | UART #1 | USART1 | PB6 TX, PB7 RX | AF7 | 与TIM4 CH1/CH2及I2C1备选映射冲突 | PCB待确认 |
 | UART #2 | USART2 | PA2 TX, PA3 RX | AF7 | 与ADC2/3, TIM2/5候选通道冲突 | PCB待确认 |
 | PWM #1 | TIM5 CH1 | PA0 | AF2 | 32位TIM5独立频率组；占用ADC0 | PCB待确认 |
