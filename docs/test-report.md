@@ -38,3 +38,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M2
 
 `make clean && make -j2 verify && make -j2 HSE_HZ=8000000 test-arm` 通过。Host 单测覆盖字节流切分/粘连、坏头部恢复、分片、重复请求、ID 回绕、背压及租约失效。两个构建配置均验证了 Cortex-M4 向量、栈边界及无动态分配器。默认 Release 静态 RAM 3,716 B。USB/WinUSB 实板验证 `NOT_RUN / WAITING_HARDWARE`。[原始日志](evidence/m2-verify.log)
+
+## M3
+
+`make -j2 verify` 退出 0。Host 检查原子预留失败无副作用、保留引脚不可抢占、DMA Stream 互斥和非法 Channel 拒绝，也检查队列溢出、同通道串行、跨通道推进、超时回绕、取消和部分结果。资源队列此阶段尚未从固件入口调用，链接结果仍是 M2 体量。[原始日志](evidence/m3-verify.log)
