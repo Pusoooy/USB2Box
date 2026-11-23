@@ -34,3 +34,7 @@
 Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。执行 `make clean && make verify && git diff --check`，退出 0。两份 ARM 镜像均为 480 B Flash，静态 RAM 0 B，链接脚本保留 8 KiB 栈空间。M0 镜像只包含复位启动和空闲循环。
 
 [原始验证日志](evidence/m0-verify.log)
+
+## M2
+
+`make clean && make -j2 verify && make -j2 HSE_HZ=8000000 test-arm` 通过。Host 单测覆盖字节流切分/粘连、坏头部恢复、分片、重复请求、ID 回绕、背压及租约失效。两个构建配置均验证了 Cortex-M4 向量、栈边界及无动态分配器。默认 Release 静态 RAM 3,716 B。USB/WinUSB 实板验证 `NOT_RUN / WAITING_HARDWARE`。[原始日志](evidence/m2-verify.log)

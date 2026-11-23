@@ -11,6 +11,7 @@ MEMBERS = {
     "cmsis-core": ("CMSIS/Core/Include", "LICENSE.txt"),
     "cmsis-device": ("Include", "Source/Templates/system_stm32f4xx.c", "LICENSE.md"),
     "hal": ("Inc", "Src", "LICENSE.md"),
+    "tinyusb": ("src", "LICENSE"),
 }
 
 

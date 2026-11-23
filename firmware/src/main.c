@@ -1,9 +1,18 @@
 #include "bsp.h"
+#include "device.h"
+#include "usb_link.h"
+
+static device dev;
 
 int main(void)
 {
-    bsp_init();
+    const bsp_clock_status clock = bsp_init();
+    device_init(&dev, 0, 0);
+    if (clock == BSP_CLOCK_HSE_PLL) usb_link_start(&dev);
     for (;;) {
+        const uint32_t now = bsp_millis();
+        device_tick(&dev, now);
+        usb_link_poll(now);
         __asm__ volatile ("wfi");
     }
 }

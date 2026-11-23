@@ -58,3 +58,5 @@ make verify
 ## 仓库迁移说明
 
 原先的任务 ZIP 为 24 项（含 `SHA256SUMS.txt`）。本 GitHub 仓库已经迁入核心设计资料、拆分文档、任务指令和结构化表；部分交接/状态资料已按最新会话要求整理为仓库版本。不要将原 ZIP 的哈希清单当作 GitHub 文件当前哈希。后续 M12 发布时应按实际仓库文件重新生成 SHA256 清单。
+
+TinyUSB 构建需要工具链的 C 标准头文件。Debian 分离打包时需安装 `libnewlib-dev`，也可用 `ARM_NEWLIB_INCLUDE` 指定已有的头文件目录。云环境使用工作区 ARM 工具链旁的 Newlib 头文件。

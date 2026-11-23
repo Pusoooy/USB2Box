@@ -71,3 +71,10 @@
 
 
 ---
+
+## M2 实现契约
+
+- Minor 0 的请求使用 FIRST=0x0001、LAST=0x0002。ERROR=0x0008 用于错误响应。一个逻辑请求可包含最多 1,024 B，每片最多 512 B，响应最多 512 B。同一时刻仅组装一个请求，要求严格递增的 offset 和序号，首片两者均为零。
+- `HELLO=1`、`GET_CAPABILITIES=2` 返回分片上限 u16、消息上限 u16、租约毫秒 u32。`GET_VERSION=3` 返回 major/minor 两字节。`OPEN_SESSION=5` 返回租约 ID u32，`HEARTBEAT=6` 和 `CLOSE_SESSION=7` 携带该 ID。`STOP_ALL=10` 无载荷，结束当前会话。租约为 2 s，部分消息在 500 ms 无进展后清除。离开会话时调用同一个停止回调。
+- 接口 0 承载 0x01/0x81，接口 1 保留独立 IN 0x82。TinyUSB DWC2 FS 以 320 字 FIFO 为上限，64 B 端点在当前配置下分配 RX 56 字、EP0/1/2 各 16 字。BOS/MS OS 2.0 提供两个 WinUSB 接口子集。实际 FIFO 行为及 Windows 绑定待 HIL。
+- 默认 `USB_VID=0 USB_PID=0` 链接完整 USB 路径，设备保持软断开。启用设备需同时提供合法 VID/PID 和经实板确认的 HSE 配置。

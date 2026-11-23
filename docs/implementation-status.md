@@ -6,7 +6,7 @@
 |---|---|---|---|
 | M0 | 基线、候选资源、帧头 | HOST_MOCK_PASS（单测） | ST 封装/AF 已校验。DMA 候选静态检查通过，待对照 RM0368 原表 |
 | M1 | ARM Makefile + C11 启动与初始化 | ARM_BUILD_PASS / HOST_MOCK_PASS | 固定 CMSIS/HAL、手写启动与 RCC/GPIO/NVIC/OTG FS BSP。默认 HSI，显式 HSE 的时钟与 USB 电气待实板 |
-| M2 | TinyUSB / Vendor Bulk / WinUSB | IN_PROGRESS | 帧头单测通过。完整 USB 栈、字节流解析及实板枚举待实现 |
+| M2 | TinyUSB / Vendor Bulk / WinUSB | ARM_BUILD_PASS / HOST_MOCK_PASS | 有界组帧和租约通过。WinUSB 枚举、0x82 业务发送、完整会话并发待后续 |
 | M3 | DMA/TIM/GPIO 资源管理 | NOT_IMPLEMENTED | 合法固定映射及原子申请 |
 | M4 | UART x2 | NOT_IMPLEMENTED | USART1/2 优先 |
 | M5 | I2C x2 | NOT_IMPLEMENTED | 仅片内弱上拉，电气可靠性不可保证 |

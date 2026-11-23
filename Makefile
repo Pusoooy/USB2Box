@@ -3,9 +3,13 @@ HOST_CC ?= cc
 PYTHON ?= python3
 ARM_DEPS ?= .deps
 HSE_HZ ?= 0
+USB_VID ?= 0
+USB_PID ?= 0
+ARM_NEWLIB_INCLUDE ?= $(dir $(shell command -v $(ARM_CC)))../include/newlib
+USB_SUFFIX := $(if $(filter-out 0,$(USB_VID) $(USB_PID)),-usb$(USB_VID)-$(USB_PID))
 CLOCK_SUFFIX := $(if $(filter-out 0,$(HSE_HZ)),-hse$(HSE_HZ))
-DEBUG_DIR := build/debug$(CLOCK_SUFFIX)
-RELEASE_DIR := build/release$(CLOCK_SUFFIX)
+DEBUG_DIR := build/debug$(CLOCK_SUFFIX)$(USB_SUFFIX)
+RELEASE_DIR := build/release$(CLOCK_SUFFIX)$(USB_SUFFIX)
 ARM_CC = $(CROSS_COMPILE)gcc
 ARM_SIZE = $(CROSS_COMPILE)size
 ARM_OBJCOPY = $(CROSS_COMPILE)objcopy
@@ -15,12 +19,18 @@ WARNINGS := -std=c11 -Wall -Wextra -Werror
 CPPFLAGS += -Ifirmware/include
 ARM_FLAGS := -mcpu=cortex-m4 -mthumb -ffreestanding -ffunction-sections -fdata-sections
 ARM_CPPFLAGS := -DSTM32F401xC -DUSER_VECT_TAB_ADDRESS -DHSE_VALUE=$(HSE_HZ)u \
+	-DUSB2BOX_VID=$(USB_VID) -DUSB2BOX_PID=$(USB_PID) \
+	-isystem $(ARM_NEWLIB_INCLUDE) -isystem $(ARM_DEPS)/tinyusb/src \
 	-isystem $(ARM_DEPS)/cmsis-core/CMSIS/Core/Include \
 	-isystem $(ARM_DEPS)/cmsis-device/Include -isystem $(ARM_DEPS)/hal/Inc
 HAL_SOURCES := $(addprefix $(ARM_DEPS)/hal/Src/stm32f4xx_,hal.c hal_rcc.c hal_gpio.c hal_cortex.c)
-ARM_VENDOR_SOURCES := $(ARM_DEPS)/cmsis-device/Source/Templates/system_stm32f4xx.c $(HAL_SOURCES)
+TINYUSB_SOURCES := $(addprefix $(ARM_DEPS)/tinyusb/src/,tusb.c common/tusb_fifo.c \
+	device/usbd.c device/usbd_control.c class/vendor/vendor_device.c \
+	portable/synopsys/dwc2/dcd_dwc2.c portable/synopsys/dwc2/dwc2_common.c)
+ARM_VENDOR_SOURCES := $(ARM_DEPS)/cmsis-device/Source/Templates/system_stm32f4xx.c $(HAL_SOURCES) $(TINYUSB_SOURCES)
 ARM_SOURCES := firmware/src/startup.S firmware/src/main.c firmware/src/frame.c \
 	firmware/src/bsp.c firmware/src/clock_policy.c firmware/src/memory.c \
+	firmware/src/device.c firmware/src/usb_link.c firmware/src/usb_descriptors.c \
 	$(ARM_VENDOR_SOURCES)
 ARM_HEADERS := $(wildcard firmware/include/*.h firmware/src/*.h)
 ARM_LINKER := firmware/stm32f401rc.ld
@@ -85,3 +95,13 @@ verify: offline-verify test-host test-arm
 
 clean:
 	rm -rf build
+
+build/host/test-device: tests/test_device.c firmware/src/device.c firmware/src/frame.c $(ARM_HEADERS) Makefile
+	mkdir -p $(@D)
+	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
+
+.PHONY: test-device
+test-device: build/host/test-device
+	./build/host/test-device
+
+test-host: test-device

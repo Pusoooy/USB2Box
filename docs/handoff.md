@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段：M1 软件门禁通过，进入 M2。官方 PDF 复查仍待完成。**
+**当前阶段：M2 协议基础通过 Host Mock 与 ARM 构建，进入 M3。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -26,3 +26,7 @@ STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系
 2. M2 固定 TinyUSB 版本，对照 STM32F401 OTG FS DCD 接口、端点和 FIFO，加入 USB 字节流拼帧、有界重组、Vendor Bulk、会话租约和端到端 Mock。复用 M0 的 [帧头与资源契约](adr/0002-m0-resource-contract.md)。
 3. M2 进入 DCD 前检查 `bsp_init()` 返回 `BSP_CLOCK_HSE_PLL`。在设备模式、软断开及 VBUS 策略配置后调用 `bsp_usb_enable_pins()`，确保 DCD 完成 IRQ 和端点初始化之后再连接。没有合法 VID/PID 时继续用 Host Mock 验证协议。
 4. 保留 PA13/PA14 SWD，I2C2 SDA 候选 PB3 AF9 及 SWO 互斥。取得实板后验证电气和走线，记录原始证据。
+
+## M2 交付
+
+工作基于 M1 `8e1c7b5`。先运行 `make fetch-deps && make verify`，TinyUSB 0.19.0 和其许可证已加入本地可验证依赖。下一阶段在设备命令和停止回调中接入 M3 资源与异步状态机，保留同一套 Host 设备核心。Newlib 头文件来自 Debian 签名仓库 `libnewlib-dev=4.5.0.20241231-1`，其库未链接。硬件状态及原始记录见测试报告。
