@@ -21,6 +21,7 @@ uint16_t job_submit(jobs *queue, uint32_t id, uint8_t lane, const uint8_t *data,
         task->id = id;
         task->lane = lane;
         task->deadline = now + timeout;
+        task->order = queue->next_order++;
         task->length = length;
         task->complete = 0;
         task->state = QUEUED;
@@ -30,11 +31,15 @@ uint16_t job_submit(jobs *queue, uint32_t id, uint8_t lane, const uint8_t *data,
     return STATUS_FULL;
 }
 
-static bool occupied(const jobs *queue, uint8_t lane)
+static bool lane_blocked(const jobs *queue, const job *candidate)
 {
-    for (unsigned i = 0; i < JOB_CAPACITY; ++i)
-        if (queue->entries[i].state == RUNNING && queue->entries[i].lane == lane)
+    for (unsigned i = 0; i < JOB_CAPACITY; ++i) {
+        const job *other = &queue->entries[i];
+        if (other == candidate || other->lane != candidate->lane) continue;
+        if (other->state == RUNNING ||
+            (other->state == QUEUED && candidate->order - other->order < 0x80000000u))
             return true;
+    }
     return false;
 }
 
@@ -47,7 +52,7 @@ void jobs_poll(jobs *queue, job_step step, uint32_t now)
             if (task->state == RUNNING) step(task, true);
             task->status = STATUS_TIMEOUT;
         } else {
-            if (task->state == QUEUED && occupied(queue, task->lane)) continue;
+            if (task->state == QUEUED && lane_blocked(queue, task)) continue;
             task->state = RUNNING;
             task->status = step(task, false);
         }
@@ -88,6 +93,7 @@ void jobs_reset(jobs *queue, job_step step)
         queue->entries[i].state = UNUSED;
     }
     queue->next = 0;
+    queue->next_order = 0;
 }
 
 bool job_lane_active(const jobs *queue, uint8_t lane)

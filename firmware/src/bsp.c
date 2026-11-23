@@ -8,6 +8,7 @@ _Static_assert(OTG_FS_IRQn == 67, "Check the OTG FS slot in startup.S");
 
 enum { USB_IRQ_PRIORITY = 6 };
 static volatile bsp_clock_status clock_status;
+static volatile bool hse_failed;
 
 static HAL_StatusTypeDef select_bus_clocks(uint32_t source, uint32_t apb1_div)
 {
@@ -79,6 +80,7 @@ bsp_clock_status bsp_init(void)
     clock_status = clock_select(HSE_VALUE);
     if (clock_status == BSP_CLOCK_HSE_PLL) {
         __HAL_RCC_USB_OTG_FS_CLK_ENABLE();
+        HAL_RCC_EnableCSS();
     }
     return clock_status;
 }
@@ -107,4 +109,25 @@ uint32_t bsp_millis(void)
 void SysTick_Handler(void)
 {
     HAL_IncTick();
+}
+
+void NMI_Handler(void)
+{
+    HAL_RCC_NMI_IRQHandler();
+}
+
+void HAL_RCC_CSSCallback(void)
+{
+    hse_failed = true;
+}
+
+bool bsp_handle_clock_failure(void)
+{
+    if (!hse_failed) return false;
+    hse_failed = false;
+    HAL_NVIC_DisableIRQ(OTG_FS_IRQn);
+    clock_status = BSP_CLOCK_FALLBACK_HSI;
+    SystemCoreClockUpdate();
+    HAL_InitTick(TICK_INT_PRIORITY);
+    return true;
 }

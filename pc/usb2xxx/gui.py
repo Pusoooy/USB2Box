@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 import json
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 import subprocess
 import sys
 
@@ -84,6 +84,8 @@ class Workbench(QMainWindow):
         self.options = options
         self.dev: USB2XXX | None = None
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="usb2box")
+        self.emergency = ThreadPoolExecutor(max_workers=1, thread_name_prefix="usb2box-stop")
+        self.connection_guard = Lock()
         self.events = _Results(self)
         self.events.finished.connect(self._finished)
         self.pending = 0
@@ -133,9 +135,11 @@ class Workbench(QMainWindow):
         def run():
             if require_device and self.stop_requested.is_set():
                 raise RuntimeError("Command cancelled by Stop all.")
-            if require_device and self.dev is None:
+            with self.connection_guard:
+                dev = self.dev
+            if require_device and dev is None:
                 raise RuntimeError("Connect a device first.")
-            return action(self.dev)
+            return action(dev)
 
         future = self.executor.submit(run)
 
@@ -151,6 +155,8 @@ class Workbench(QMainWindow):
     def _finished(self, callback, value, error) -> None:
         self.pending -= 1
         if error:
+            if callback == self._on_adc:
+                self.capturing = False
             self.log.appendPlainText(error)
         elif callback:
             callback(value)
@@ -158,11 +164,19 @@ class Workbench(QMainWindow):
             self.log.appendPlainText(str(value))
 
     def connect_device(self) -> None:
+        self.stop_requested.clear()
+
         def connect(dev):
-            self.stop_requested.clear()
             if dev is None:
-                self.dev = USB2XXX.open(**self.options)
-            return self.dev.capabilities()
+                dev = USB2XXX.open(**self.options)
+                with self.connection_guard:
+                    cancelled = self.stop_requested.is_set()
+                    if not cancelled:
+                        self.dev = dev
+                if cancelled:
+                    dev.close()
+                    raise RuntimeError("Connection cancelled by Stop all.")
+            return dev.capabilities()
 
         def ready(capabilities):
             mode = "SIMULATED" if capabilities["simulated"] else "USB"
@@ -172,8 +186,9 @@ class Workbench(QMainWindow):
         self.submit(connect, ready, require_device=False)
 
     def _close(self, emergency: bool = False) -> bool:
-        if self.dev is not None:
+        with self.connection_guard:
             dev, self.dev = self.dev, None
+        if dev is not None:
             try:
                 if emergency:
                     dev.stop_all()
@@ -194,15 +209,16 @@ class Workbench(QMainWindow):
         self.stop_requested.set()
         # The control is independent of the usual pending action limit.
         self.pending += 1
-        future = self.executor.submit(self._close, True)
+        future = self.emergency.submit(self._close, True)
         future.add_done_callback(lambda task: self.events.finished.emit(
             self._closed, None, str(task.exception()) if task.exception() else None))
 
     def closeEvent(self, event) -> None:
         self.timer.stop()
         self.stop_requested.set()
+        self.emergency.submit(self._close)
+        self.emergency.shutdown(wait=True)
         self.executor.shutdown(wait=True, cancel_futures=True)
-        self._close()
         event.accept()
 
     def _panel(self, name, fields):
@@ -223,7 +239,8 @@ class Workbench(QMainWindow):
         page.button("Find devices", lambda: self.submit(lambda _: list_devices(
             mock=self.options["mock"], vid=self.options.get("vid", 0),
             pid=self.options.get("pid", 0)), require_device=False))
-        self._action(page, "Refresh status", lambda dev, _: dev.capabilities())
+        self._action(page, "Refresh status", lambda dev, _: {
+            "capabilities": dev.capabilities(), "protocol": dev.diagnostics()})
         self._action(page, "Resource owners", lambda dev, _: {
             index: owner for index, owner in enumerate(dev.resources()) if owner})
         page.button("Export log", self._export_log)
@@ -329,6 +346,9 @@ class Workbench(QMainWindow):
         self._action(page, "Start bounded output", lambda d, v: d.pwm_start(int(v["group"]), int(v["ms"]), int(v["pulses"])))
         self._action(page, "Actual", lambda d, v: d.pwm_status(int(v["group"])))
         self._action(page, "Stop", lambda d, v: d.pwm_stop(int(v["group"])))
+        self._action(page, "Capture PB6", lambda d, _: d.pwm_capture_start())
+        self._action(page, "Measure", lambda d, _: d.pwm_capture_read())
+        self._action(page, "Release input", lambda d, _: d.pwm_capture_stop())
         page.layout.addStretch()
 
     def _build_spi(self):
@@ -344,12 +364,14 @@ class Workbench(QMainWindow):
         page = self._panel("ADC", [("channels", "Channel:sampling-code list", "10:2"),
                                    ("res", "Resolution bits", "12"), ("hz", "Aggregate samples/s", "10000"),
                                    ("count", "Samples (0 for continuous)", "1024"),
-                                   ("pre", "Pre-trigger samples", "0"), ("post", "Post-trigger samples", "0")])
+                                   ("pre", "Pre-trigger samples", "0"), ("post", "Post-trigger samples", "0"),
+                                   ("watchdog", "Watchdog channel:low:high", "10:0:4095")])
         self._action(page, "Configure", lambda d, v: d.adc_configure(
             [tuple(map(int, part.split(":"))) for part in v["channels"].split(",")], int(v["res"])))
         self._action(page, "Capture", lambda d, v: d.adc_start(
             int(v["hz"]), int(v["count"]), int(v["pre"]), int(v["post"])), self._capture_started)
         self._action(page, "Trigger", lambda d, _: d.adc_trigger())
+        self._action(page, "Watchdog", lambda d, v: d.adc_watchdog(*map(int, v["watchdog"].split(":"))))
         self._action(page, "Stop", lambda d, _: d.adc_stop(), lambda _: setattr(self, "capturing", False))
         page.button("Export samples", self._export_adc)
         self.adc_status = QLabel("Idle")
@@ -369,7 +391,7 @@ class Workbench(QMainWindow):
                 for _ in range(8):
                     block = dev.adc_read()
                     blocks.append(block)
-                    if not block.samples or not block.running:
+                    if not block.samples or not (block.running or block.more_available):
                         break
                 return blocks
             self.submit(collect, self._on_adc)
@@ -382,7 +404,7 @@ class Workbench(QMainWindow):
         block = blocks[-1]
         self.adc_status.setText(f"{block.rate:,} samples/s  ·  {block.dropped:,} lost  ·  "
                                 f"{'Waiting for trigger' if block.awaiting_trigger else 'Capturing' if block.running else 'Stopped'}")
-        self.capturing = block.running or len(block.samples) == 248
+        self.capturing = block.running or block.more_available
 
     def _export_adc(self):
         if self.last_block is None:

@@ -15,6 +15,7 @@ static bool matches(const char *left, const char *right)
 
 void resources_init(resources *pool)
 {
+    pool->last_conflict = 0xff;
     for (unsigned i = 0; i < RESOURCE_COUNT; ++i) pool->owner[i] = 0;
     for (unsigned pin = 11; pin <= 14; ++pin)
         pool->owner[RESOURCE_PIN('A', pin)] = RESOURCE_SYSTEM_OWNER;
@@ -52,7 +53,7 @@ uint16_t resource_reserve(resources *pool, const resource_plan *plan,
         const uint8_t id = plan->ids[i];
         if (id >= RESOURCE_COUNT) return STATUS_VALUE;
         if (pool->owner[id] && pool->owner[id] != owner) {
-            *conflict = id;
+            pool->last_conflict = *conflict = id;
             return STATUS_BUSY;
         }
     }

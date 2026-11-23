@@ -71,7 +71,7 @@ class Adapter:
                 return self.result("ok", values, warnings=warnings)
             except Busy as error:
                 return self.result("busy", {"status_code": error.status},
-                                   conflicts=("Device or required resource is occupied.",))
+                                   conflicts=(error.detail.get("resource", "occupied"),))
             except RemoteError as error:
                 return self.result("device_error", {"status_code": error.status,
                                                      "partial_bytes": len(error.partial)})
@@ -214,14 +214,14 @@ def create_server(adapter: Adapter) -> FastMCP:
                 while True:
                     block = dev.adc_read()
                     data.extend(block.samples)
-                    if not block.running and len(block.samples) < 248:
+                    if not block.running and not block.more_available:
                         break
                     if monotonic() >= until:
                         raise Deadline("capture completion deadline")
                     sleep(0.005)
             finally:
                 dev.adc_stop()
-            completed = ADCBlock(block.rate, 0, block.dropped, block.resolution, False, False, tuple(data))
+            completed = ADCBlock(block.rate, 0, block.dropped, block.resolution, False, False, False, block.threshold_seen, tuple(data))
             adapter.next_capture += 1
             capture_id = adapter.next_capture
             adapter.captures[capture_id] = completed
@@ -248,6 +248,7 @@ def create_server(adapter: Adapter) -> FastMCP:
         """Inspect current resource ownership and recent capture summaries."""
         return adapter.use(lambda dev: {
             "owners": dev.resources(),
+            "protocol_counters": dev.diagnostics(),
             "captures": {str(key): {name: value for name, value in asdict(block).items()
                                    if name != "samples"} for key, block in adapter.captures.items()},
         })

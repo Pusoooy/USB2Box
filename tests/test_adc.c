@@ -38,7 +38,16 @@ int main(void)
     assert(adc_command(&pool, 3, start, sizeof start, out, &written) == STATUS_OK);
     for (unsigned i = 0; i < ADC_CACHE / ADC_BLOCK + 1; ++i) adc_poll();
     assert(adc_command(&pool, 6, limit, sizeof limit, out, &written) == STATUS_OK);
-    assert(wire_u32(out + 8) == ADC_BLOCK && out[15] == 0);
+    assert(wire_u32(out + 8) == ADC_BLOCK && !(out[15] & 1));
+    uint8_t threshold[] = {10, 0, 0, 1, 0};
+    assert(adc_command(&pool, 8, threshold, sizeof threshold, out, &written) == STATUS_OK);
+    wire_put16(start + 6, 4);
+    wire_put16(start + 8, 6);
+    assert(adc_command(&pool, 3, start, sizeof start, out, &written) == STATUS_OK);
+    adc_poll();
+    adc_poll();
+    assert(adc_command(&pool, 6, limit, sizeof limit, out, &written) == STATUS_OK);
+    assert(wire_u16(out + 12) == 10 && (out[15] & 8));
     adc_stop_all(&pool);
     assert(!pool.owner[RESOURCE_STREAM(2, 4)]);
     puts("ADC scan, finite count, pre/post trigger, credit and overrun stop passed");

@@ -8,6 +8,7 @@ static volatile uint32_t ready, errors;
 static uint32_t read_at;
 static uint16_t finite;
 static bool active;
+static volatile bool threshold;
 
 static const uint32_t sample_time[] = {
     ADC_SAMPLETIME_3CYCLES, ADC_SAMPLETIME_15CYCLES, ADC_SAMPLETIME_28CYCLES,
@@ -48,7 +49,13 @@ static bool configure_adc(const adc_config *cfg, bool timer)
             HAL_GPIO_Init(port, &mode);
         }
     }
-    return true;
+    if (!cfg->watchdog) return true;
+    ADC_AnalogWDGConfTypeDef watchdog = {
+        .WatchdogMode = ADC_ANALOGWATCHDOG_SINGLE_REG,
+        .Channel = cfg->watchdog_channel == 16 ? ADC_CHANNEL_TEMPSENSOR : cfg->watchdog_channel,
+        .ITMode = ENABLE, .HighThreshold = cfg->high, .LowThreshold = cfg->low,
+    };
+    return HAL_ADC_AnalogWDGConfig(&adc, &watchdog) == HAL_OK;
 }
 
 uint32_t adc_driver_start(const adc_config *cfg, uint32_t rate_hz, uint16_t samples)
@@ -87,6 +94,7 @@ uint32_t adc_driver_start(const adc_config *cfg, uint32_t rate_hz, uint16_t samp
     __HAL_LINKDMA(&adc, DMA_Handle, adc_dma);
     if (HAL_DMA_Init(&adc_dma) != HAL_OK) return 0;
     ready = read_at = errors = 0;
+    threshold = false;
     TIM2->CR1 = 0;
     TIM2->CR2 = TIM_TRGO_UPDATE;
     TIM2->PSC = 0;
@@ -153,5 +161,15 @@ void HAL_ADC_ErrorCallback(ADC_HandleTypeDef *handle)
 {
     if (handle == &adc) ++errors;
 }
+bool adc_driver_triggered(void) { return threshold; }
+
+void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *handle)
+{
+    if (handle == &adc) {
+        threshold = true;
+        __HAL_ADC_DISABLE_IT(&adc, ADC_IT_AWD);
+    }
+}
+
 void DMA2_Stream4_IRQHandler(void) { HAL_DMA_IRQHandler(&adc_dma); }
 void ADC_IRQHandler(void) { HAL_ADC_IRQHandler(&adc); }

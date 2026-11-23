@@ -36,6 +36,7 @@ void device_init(device *dev, device_command command, device_stop stop)
     dev->stop = stop;
     dev->active = false;
     dev->lease_id = 0;
+    dev->requests = dev->invalid_headers = dev->errors = dev->lease_expired = dev->resets = 0;
     device_reset(dev);
 }
 
@@ -49,6 +50,7 @@ static void stop_session(device *dev)
 
 void device_reset(device *dev)
 {
+    ++dev->resets;
     stop_session(dev);
     reset_rx(dev);
     dev->tx_size = 0;
@@ -59,6 +61,7 @@ void device_reset(device *dev)
 void device_tick(device *dev, uint32_t now)
 {
     if (dev->active && now - dev->lease_at >= DEVICE_LEASE_MS) {
+        ++dev->lease_expired;
         stop_session(dev);
         reset_rx(dev);
     }
@@ -85,6 +88,11 @@ static uint16_t system_command(device *dev, uint16_t length, uint8_t *out,
         out[0] = 1;
         out[1] = 0;
         *written = 2;
+        return STATUS_OK;
+    case SYS_DEVICE_INFO:
+        if (length) return STATUS_VALUE;
+        for (unsigned i = 0; i < 7; ++i) out[i] = (uint8_t)"USB2Box"[i];
+        *written = 7;
         return STATUS_OK;
     case SYS_OPEN:
         if (length) return STATUS_VALUE;
@@ -126,8 +134,17 @@ static void enqueue_reply(device *dev, const frame_header *request,
     };
     if (status != STATUS_OK || written > DEVICE_FRAGMENT) {
         if (status == STATUS_OK) status = STATUS_FULL;
+        ++dev->errors;
         reply.flags |= FLAG_ERROR;
-        written = 0;
+        uint8_t *error = dev->tx + FRAME_HEADER_SIZE;
+        const uint8_t resource = status == STATUS_BUSY && written == 1 ? error[0] : 0xff;
+        error[0] = (uint8_t)(status >> 12);
+        error[1] = resource;
+        error[2] = status == STATUS_BUSY || status == STATUS_FULL || status == STATUS_TIMEOUT;
+        error[3] = 0;
+        wire_put32(error + 4, dev->partial_at);
+        wire_put32(error + 8, 0);
+        written = 12;
     }
     reply.status = status;
     reply.length = written;
@@ -139,6 +156,7 @@ static void enqueue_reply(device *dev, const frame_header *request,
 
 static void dispatch(device *dev, uint32_t now)
 {
+    ++dev->requests;
     uint16_t written = 0;
     uint16_t status = STATUS_SESSION;
     uint8_t *out = dev->tx + FRAME_HEADER_SIZE;
@@ -148,6 +166,14 @@ static void dispatch(device *dev, uint32_t now)
         dev->last_request = dev->message.request_id;
         if (dev->message.service == 0) {
             status = system_command(dev, dev->assembled, out, &written, now);
+        } else if (dev->message.service == SERVICE_DIAG && dev->message.opcode == 1 && !dev->assembled) {
+            wire_put32(out, dev->requests);
+            wire_put32(out + 4, dev->invalid_headers);
+            wire_put32(out + 8, dev->errors);
+            wire_put32(out + 12, dev->lease_expired);
+            wire_put32(out + 16, dev->resets);
+            written = 20;
+            status = STATUS_OK;
         } else if (dev->active) {
             status = dev->command ? dev->command(dev->message.service, dev->message.opcode,
                      dev->input, dev->assembled, out, &written, now) : STATUS_OPCODE;
@@ -199,6 +225,7 @@ size_t device_feed(device *dev, const uint8_t *bytes, size_t length, uint32_t no
             if (dev->header_used != FRAME_HEADER_SIZE) continue;
             if (!frame_decode(&dev->fragment, dev->header, FRAME_HEADER_SIZE,
                               DEVICE_FRAGMENT, DEVICE_MESSAGE)) {
+                ++dev->invalid_headers;
                 dev->assembling = false;
                 dev->assembled = 0;
                 for (size_t i = 1; i < FRAME_HEADER_SIZE; ++i) {

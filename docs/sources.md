@@ -20,3 +20,10 @@
 | STM32F4 HAL | v1.8.3 | `LICENSE.md`，BSD-3-Clause |
 
 提交 URL 和归档的 SHA-256 见 [依赖锁](../tools/arm-dependencies.lock)。工具链取自 Debian trixie 签名仓库的 `gcc-arm-none-eabi=15:14.2.rel1-1` 和 `binutils-arm-none-eabi=2.44-3+23+b1`。离线发行物和工具链再分发清单留待 M12。
+
+
+## M2–M12 依赖来源
+
+- TinyUSB 0.19.0（MIT），由 ARM 依赖锁记录。Newlib 头文件 Debian `libnewlib-dev=4.5.0.20241231-1`，工具链二进制的原始包 SHA-256 见 `tools/debian-arm-amd64.sha256`。
+- PyUSB 1.3.1、PySide6 6.9.3、MCP 1.20.0、Pydantic 2.12.5、NumPy 2.3.4 及运行依赖由对应 Linux/Windows CPython 3.12 wheel 的 SHA-256 锁定。
+- libusb v1.0.29（LGPL-2.1-or-later），Windows 包保留可替换 DLL 与同版本源归档。上游文件哈希见 `tools/stage_windows_release.py`。

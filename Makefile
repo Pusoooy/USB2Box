@@ -197,3 +197,26 @@ test-gui: mock-device
 .PHONY: test-mcp
 test-mcp: mock-device
 	PYTHONPATH=pc $(PYTHON) -m unittest discover -s tests -p 'test_mcp.py' -v
+
+ST_FLASH ?= st-flash
+HIL_ARGS ?=
+
+.PHONY: flash hil-verify verify-all
+flash: debug
+	$(ST_FLASH) --reset write $(DEBUG_DIR)/usb2box.bin 0x08000000
+
+hil-verify:
+	PYTHONPATH=pc $(PYTHON) tools/hil.py$(if $(strip $(HIL_ARGS)), $(HIL_ARGS))
+
+verify-all: verify test-gui test-mcp
+
+WIN_CC ?= x86_64-w64-mingw32-gcc
+SEVEN_ZIP ?= 7z
+WIN_PACKAGE ?= dist/usb2xxx-windows-x64
+WIN_STAGE_ARGS ?=
+
+.PHONY: package-windows
+package-windows:
+	$(MAKE) mock-device MOCK_EXE=dist/windows-x64/mock-device.exe HOST_CC=$(WIN_CC) HOST_LDFLAGS=-static
+	$(PYTHON) -m pip wheel --no-build-isolation --no-deps . -w dist
+	$(PYTHON) tools/stage_windows_release.py --output "$(WIN_PACKAGE)" --mock dist/windows-x64/mock-device.exe --sdk-wheel dist/usb2xxx-0.1.0-py3-none-any.whl --seven-zip "$(SEVEN_ZIP)" $(WIN_STAGE_ARGS)

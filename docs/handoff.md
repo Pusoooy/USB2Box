@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段：M11 实施进度见下文。**
+**当前阶段：M12 软件回归通过，Windows 实机和 HIL 待验证。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -13,14 +13,24 @@ STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系
 5. `docs/windows-gui-mcp.md` + `docs/roadmap.md` + `docs/test-and-acceptance.md`
 6. `prompts/CODEX_MASTER_PROMPT.md` + `prompts/TASKS.md`
 
-## 最近交付
+## M12 交接
+
+- 从 M11 提交 `5c9b2d7` 继续，逐阶段提交在同一历史中。M12 补齐 TIM4/PB6 输入捕获、ADC 模拟看门狗与流结束标记、设备计数和资源冲突详情、HSE 故障退出与统一 PWM 优先停机。
+- 使用当前 checkout，执行 `bash tools/install_cloud.sh` 后设置 ARM GCC PATH。标准回归为 `make verify`。CPython 3.12 x86-64 的 PC 工具依赖使用 `pc/requirements-linux-cp312.lock`，完整回归运行 `make verify-all`。
+- [HIL 指引](hil-fixtures.md) 给出 ST-Link 下载、USB 识别和五个夹具。首次硬件工作核验 PCB/晶振/VBUS 走线及合法 VID/PID，再执行 H00 到 H09。实物缺失时硬件记录仍为 `NOT_RUN`。
+- Windows x64 wheelhouse、MinGW 模拟器、可替换 libusb 和 SHA256 清单经 Linux 构建验证。Windows 运行时需已有 CPython 3.12，待实际 Windows 10/11 测试与公开再分发审查。[离线工作台说明](windows-offline.md)
+- 软件细项仍可推进。当前 UART 的上位机读取依赖轮询，I²C 从机返回最新事件及累计计数，PWM 运行中配置更新返回 busy，ADC 阈值触发以 DMA 块边界确定位置。资源管理、MCP 和 HIL 尚未生成真实跨进程或极限吞吐数据。具体通过项见 [测试报告](test-report.md)。
+
+## 历史交接
+
+### M1 交付
 
 - 本地 `work` 分支从 M0 提交 `39eb6e4e2471d63f909e26f25fe295338f737e9d` 继续。本文件随 M1 变更提交。
 - CMSIS Core 5.9.0、CMSIS Device F4 v2.6.10 与 STM32F4 HAL v1.8.3 已按提交和 SHA-256 锁定。默认构建在 HSI 启动。显式 HSE 候选镜像建立 84/48 MHz PLL 配置，异常时尝试回退 HSI。
 - `make clean && make verify` 和两组 HSE 样本构建通过。静态 RAM 20 B，另预留 8 KiB 栈。[原始日志](evidence/m1-verify.log)
 - 实际 HSE、PCB、USB 电气及 HIL 仍为 `WAITING_HARDWARE`。DS9716 与 RM0368 PDF 请求仍返回代理 403，现有候选依据见 [M0 资源审查](m0-resource-audit.md)。
 
-## 下一步
+### M1 当时的下一步
 
 1. 在现有 checkout 运行 `make verify`。云环境可将 `/workspace/usb2box-tools/arm/usr/bin` 加入 PATH。依赖缓存缺失时按 [README](../README.md) 准备。
 2. M2 固定 TinyUSB 版本，对照 STM32F401 OTG FS DCD 接口、端点和 FIFO，加入 USB 字节流拼帧、有界重组、Vendor Bulk、会话租约和端到端 Mock。复用 M0 的 [帧头与资源契约](adr/0002-m0-resource-contract.md)。

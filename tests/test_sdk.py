@@ -41,20 +41,21 @@ class SDKTests(unittest.TestCase):
             for group in range(2):
                 dev.pwm_configure(group, 1000 + group * 325, 250000)
                 self.assertTrue(dev.pwm_start(group, 1000)["running"])
-            with self.assertRaises(Busy):
+            with self.assertRaises(Busy) as conflict:
                 dev.adc_configure([(0, 7)])
+            self.assertEqual(conflict.exception.detail["resource"], 0)
             self.assertEqual(dev.spi_transfer([pattern], bits=16, mode=3, cs=1), [pattern])
             self.assertEqual(dev.adc_read_once(11), 341)
             dev.adc_configure([(10, 2), (11, 2)])
             dev.adc_start(50000, 256)
-            with self.assertRaises(Busy):
+            with self.assertRaises(Busy) as conflict:
                 dev.spi_transfer([b"collision"], cs=1)
             deadline = time.monotonic() + 0.3
             samples = []
             while time.monotonic() < deadline:
                 block = dev.adc_read(128)
                 samples.extend(block.samples)
-                if not block.running:
+                if not block.running and not block.more_available:
                     break
                 time.sleep(0.004)
             self.assertEqual(len(samples), 256)
@@ -71,7 +72,7 @@ class SDKTests(unittest.TestCase):
         async def run():
             async with await USB2XXX.open_async(mock=True) as dev:
                 self.assertEqual((await dev.capabilities())["version"], (1, 0))
-                await dev.call(5, 1, bytes([12, 1, 10, 2]))
+                await dev.run(USB2XXX.adc_configure, [(10, 2)])
                 await dev.call(5, 3, (100000).to_bytes(4, "little") + bytes([8, 0, 0, 0, 0, 0]))
                 blocks = [block async for block in dev.capture_stream()]
                 self.assertEqual(sum(len(block.samples) for block in blocks), 8)

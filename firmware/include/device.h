@@ -26,6 +26,7 @@ typedef struct {
     device_command command;
     device_stop stop;
     uint32_t lease_id, lease_at, partial_at, last_request;
+    uint32_t requests, invalid_headers, errors, lease_expired, resets;
     bool active, assembling;
     frame_header fragment, message;
     uint16_t header_used, payload_used, assembled, tx_size, tx_sent;

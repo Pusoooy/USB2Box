@@ -12,6 +12,7 @@ int main(void)
     device_init(&dev, app_command, app_stop);
     if (clock == BSP_CLOCK_HSE_PLL) usb_link_start(&dev);
     for (;;) {
+        if (bsp_handle_clock_failure()) usb_link_shutdown();
         const uint32_t now = bsp_millis();
         device_tick(&dev, now);
         app_poll(now);

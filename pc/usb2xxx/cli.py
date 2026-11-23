@@ -68,7 +68,15 @@ def _run(args, dev: USB2XXX):
                                                        mode=args.mode, bits=args.bits)]
     if args.command == "uart":
         dev.uart_configure(args.port, args.baud)
-        return {"queued": dev.uart_write(args.port, bytes.fromhex(args.hex))}
+        from time import monotonic, sleep
+        from . import Deadline
+        queued = dev.uart_write(args.port, bytes.fromhex(args.hex))
+        end = monotonic() + 1.5
+        while dev.uart_stats(args.port)[2]:
+            if monotonic() >= end:
+                raise Deadline("UART transmit did not drain")
+            sleep(0.005)
+        return {"sent": queued}
     if args.command == "i2c":
         messages = []
         if args.write:
@@ -76,6 +84,11 @@ def _run(args, dev: USB2XXX):
         if args.read:
             messages.append(I2CMessage(read=args.read))
         dev.i2c_configure(args.bus)
+        if dev.simulated:
+            slave = 1 - args.bus
+            dev.i2c_configure(slave)
+            dev.i2c_role(slave, True, args.address)
+            dev.i2c_slave_buffer(slave, bytes(range(64)))
         return dev.i2c_transfer(args.bus, args.address, messages).hex()
     if args.command == "pwm":
         from time import sleep

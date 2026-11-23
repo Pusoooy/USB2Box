@@ -4,7 +4,7 @@ static adc_config config;
 static uint16_t cache[ADC_CACHE];
 static uint32_t produced, consumed, target, dropped, rate;
 static uint16_t pre_trigger, post_trigger, credits;
-static bool configured, running, awaiting_trigger;
+static bool configured, running, awaiting_trigger, stream_finished, threshold_seen;
 
 static void stop(void)
 {
@@ -21,9 +21,20 @@ void adc_stop_all(resources *pool)
     resource_release(pool, 8);
 }
 
+static void trigger(void)
+{
+    if (produced - consumed > pre_trigger) consumed = produced - pre_trigger;
+    target = produced + post_trigger;
+    awaiting_trigger = false;
+}
+
 void adc_poll(void)
 {
     if (!running) return;
+    if (config.watchdog && adc_driver_triggered()) {
+        threshold_seen = true;
+        if (awaiting_trigger) trigger();
+    }
     uint16_t block[ADC_BLOCK];
     uint32_t lost = 0;
     const uint16_t count = adc_driver_read(block, &lost);
@@ -101,6 +112,7 @@ static uint16_t start(uint32_t hz, uint16_t samples, uint16_t pre, uint16_t post
     post_trigger = post;
     awaiting_trigger = post != 0;
     credits = 0;
+    stream_finished = threshold_seen = false;
     rate = adc_driver_start(&config, hz, post ? 0 : samples);
     running = rate != 0;
     if (!running) awaiting_trigger = false;
@@ -116,7 +128,8 @@ static uint16_t read_samples(uint8_t *out, uint16_t limit)
     wire_put32(out + 8, dropped);
     wire_put16(out + 12, limit);
     out[14] = config.resolution;
-    out[15] = (uint8_t)((running ? 1 : 0) | (awaiting_trigger ? 2 : 0));
+    out[15] = (uint8_t)((running ? 1 : 0) | (awaiting_trigger ? 2 : 0) |
+                        (available > limit ? 4 : 0) | (threshold_seen ? 8 : 0));
     for (unsigned i = 0; i < limit; ++i)
         wire_put16(out + 16 + 2 * i, cache[consumed++ % ADC_CACHE]);
     return (uint16_t)(16 + 2 * limit);
@@ -124,9 +137,12 @@ static uint16_t read_samples(uint8_t *out, uint16_t limit)
 
 uint16_t adc_stream_payload(uint8_t *out)
 {
-    if (!credits || awaiting_trigger || produced == consumed) return 0;
+    if (!credits || awaiting_trigger || stream_finished ||
+        (produced == consumed && running)) return 0;
     --credits;
-    return read_samples(out, (DEVICE_FRAGMENT - 16) / 2);
+    const uint16_t length = read_samples(out, (DEVICE_FRAGMENT - 16) / 2);
+    if (!running && produced == consumed) stream_finished = true;
+    return length;
 }
 
 uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
@@ -146,9 +162,7 @@ uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
         return STATUS_OK;
     case 5:
         if (length != 0 || !awaiting_trigger) return STATUS_VALUE;
-        if (produced - consumed > pre_trigger) consumed = produced - pre_trigger;
-        target = produced + post_trigger;
-        awaiting_trigger = false;
+        trigger();
         return STATUS_OK;
     case 6: {
         if (length != 2 || !configured) return STATUS_VALUE;
@@ -162,6 +176,20 @@ uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
             return STATUS_VALUE;
         credits += wire_u16(input);
         return STATUS_OK;
+    case 8: {
+        if (length != 5 || !configured || running) return STATUS_VALUE;
+        const uint16_t low = wire_u16(input + 1), high = wire_u16(input + 3);
+        if (low > high || high >= (1u << config.resolution)) return STATUS_VALUE;
+        for (unsigned rank = 0; rank < config.ranks; ++rank) {
+            if (config.channels[rank] != input[0]) continue;
+            config.watchdog = true;
+            config.watchdog_channel = input[0];
+            config.low = low;
+            config.high = high;
+            return STATUS_OK;
+        }
+        return STATUS_VALUE;
+    }
     default:
         return STATUS_OPCODE;
     }

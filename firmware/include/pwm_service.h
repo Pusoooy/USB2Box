@@ -20,4 +20,8 @@ void pwm_driver_start(unsigned group, const pwm_period *period, uint32_t pulses)
 void pwm_driver_stop(unsigned group);
 bool pwm_driver_running(unsigned group);
 
+bool pwm_capture_start(uint32_t counter_hz);
+bool pwm_capture_read(uint32_t *period, uint32_t *high, uint32_t *counter_hz);
+void pwm_capture_stop(void);
+
 #endif

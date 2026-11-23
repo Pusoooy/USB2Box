@@ -25,6 +25,7 @@ class ProtocolError(DeviceError):
 class RemoteError(DeviceError):
     def __init__(self, status: int, partial: bytes = b""):
         self.status, self.partial = status, partial
+        self.detail: dict = {}
         super().__init__(f"device status 0x{status:04x}")
 
 

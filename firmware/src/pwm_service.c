@@ -7,6 +7,7 @@ typedef struct {
 } pwm_state;
 
 static pwm_state groups[2];
+static bool capture;
 
 bool pwm_calculate(uint32_t clock, unsigned width, uint32_t frequency,
                    uint32_t duty, pwm_period *period)
@@ -40,6 +41,9 @@ static void stop_group(resources *pool, unsigned group)
 void pwm_stop_all(resources *pool)
 {
     for (unsigned group = 0; group < 2; ++group) stop_group(pool, group);
+    if (capture) pwm_capture_stop();
+    capture = false;
+    resource_release(pool, 9);
 }
 
 void pwm_poll(uint32_t now)
@@ -52,6 +56,35 @@ void pwm_poll(uint32_t now)
 uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
                      uint16_t length, uint8_t *out, uint16_t *written, uint32_t now)
 {
+    if (opcode == 6) {
+        if (length != 4 || capture || !wire_u32(input)) return STATUS_VALUE;
+        resource_plan plan = {0};
+        resource_add(&plan, RESOURCE_PIN('B', 6));
+        resource_add(&plan, RESOURCE_TIMER(4));
+        uint8_t conflict;
+        const uint16_t status = resource_reserve(pool, &plan, 9, &conflict);
+        if (status != STATUS_OK) return status;
+        capture = pwm_capture_start(wire_u32(input));
+        if (!capture) resource_release(pool, 9);
+        return capture ? STATUS_OK : STATUS_VALUE;
+    }
+    if (opcode == 7) {
+        if (length || !capture) return STATUS_VALUE;
+        uint32_t period, high, clock;
+        if (!pwm_capture_read(&period, &high, &clock)) return STATUS_BUSY;
+        wire_put32(out, period);
+        wire_put32(out + 4, high);
+        wire_put32(out + 8, clock);
+        *written = 12;
+        return STATUS_OK;
+    }
+    if (opcode == 8) {
+        if (length || !capture) return STATUS_VALUE;
+        pwm_capture_stop();
+        capture = false;
+        resource_release(pool, 9);
+        return STATUS_OK;
+    }
     if (!length || input[0] > 1) return STATUS_VALUE;
     const unsigned group = input[0];
     pwm_state *state = &groups[group];

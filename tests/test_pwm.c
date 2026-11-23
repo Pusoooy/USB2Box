@@ -26,6 +26,11 @@ int main(void)
         wire_put32(req + 5, 10);
         assert(pwm_command(&pool, 2, req, 9, out, &written, UINT32_MAX - 10) == STATUS_OK);
     }
+    wire_put32(req, 1000000);
+    assert(pwm_command(&pool, 6, req, 4, out, &written, 0) == STATUS_OK);
+    assert(pwm_command(&pool, 7, NULL, 0, out, &written, 0) == STATUS_OK);
+    assert(written == 12 && wire_u32(out) == 1000 && wire_u32(out + 4) == 250);
+    assert(pwm_command(&pool, 8, NULL, 0, out, &written, 0) == STATUS_OK);
     pwm_poll(9);
     assert(!pwm_driver_running(0) && pwm_driver_running(1));
     pwm_stop_all(&pool);

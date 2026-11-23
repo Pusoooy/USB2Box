@@ -60,4 +60,4 @@ Host可使用原生编译Sanitizer或fuzz harness作为推荐增强，但不能�
 `make offline-verify`：不进行网络操作，并验证本地所有依赖与校验值。
 `make hil-verify`：显式依赖真实硬件；无硬件时退出非零或标为`NOT_RUN`，绝不自动转为Mock成功。
 
-这些目标是未来Makefile的接口要求；当前文档包没有Makefile或可执行固件，请勿将命令当作已经存在。
+当前 Makefile 提供这些目标。`make verify-all` 增加 Qt offscreen 和 MCP stdio 检查，实板夹具和参数见 [HIL 指引](hil-fixtures.md)。

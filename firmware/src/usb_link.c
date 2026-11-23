@@ -21,6 +21,14 @@ bool usb_link_start(device *dev)
     return tud_connect();
 }
 
+void usb_link_shutdown(void)
+{
+    if (!link_device) return;
+    tud_disconnect();
+    device_reset(link_device);
+    link_device = 0;
+}
+
 static void send_stream(void)
 {
     if (stream_offset == stream_length) {

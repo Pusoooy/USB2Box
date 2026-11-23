@@ -6,7 +6,8 @@
 .balign 512
 .word __stack_top
 .word Reset_Handler
-.rept 5 /* NMI, HardFault, MemManage, BusFault, UsageFault */
+.word NMI_Handler
+.rept 4 /* HardFault, MemManage, BusFault, UsageFault */
 .word Default_Handler
 .endr
 .rept 4

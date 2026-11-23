@@ -74,3 +74,58 @@ static void compare_irq(unsigned group)
 
 void TIM5_IRQHandler(void) { compare_irq(0); }
 void TIM3_IRQHandler(void) { compare_irq(1); }
+
+static uint32_t capture_clock;
+static bool capture_seen;
+
+bool pwm_capture_start(uint32_t counter_hz)
+{
+    const uint32_t clock = pwm_driver_clock();
+    if (counter_hz > clock) return false;
+    const uint32_t divider = (clock + counter_hz - 1) / counter_hz;
+    if (divider > 65536) return false;
+    capture_clock = clock / divider;
+    capture_seen = false;
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_TIM4_CLK_ENABLE();
+    GPIO_InitTypeDef input = {
+        .Pin = GPIO_PIN_6, .Mode = GPIO_MODE_AF_PP, .Alternate = GPIO_AF2_TIM4,
+    };
+    HAL_GPIO_Init(GPIOB, &input);
+    TIM4->CR1 = 0;
+    TIM4->DIER = 0;
+    TIM4->CCER = 0;
+    TIM4->PSC = divider - 1;
+    TIM4->ARR = UINT16_MAX;
+    TIM4->CCMR1 = TIM_CCMR1_CC1S_0 | TIM_CCMR1_CC2S_1; /* Direct and indirect TI1. */
+    TIM4->SMCR = TIM_SMCR_TS_0 | TIM_SMCR_TS_2 | TIM_SMCR_SMS_2;
+    TIM4->EGR = TIM_EGR_UG;
+    TIM4->SR = 0;
+    TIM4->CCER = TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC2P;
+    TIM4->CR1 = TIM_CR1_URS | TIM_CR1_CEN;
+    return true;
+}
+
+bool pwm_capture_read(uint32_t *period, uint32_t *high, uint32_t *counter_hz)
+{
+    const uint32_t flags = TIM4->SR;
+    if (!(flags & TIM_SR_CC1IF)) return false;
+    const uint32_t measured_period = TIM4->CCR1;
+    const uint32_t measured_high = TIM4->CCR2;
+    TIM4->SR = ~(TIM_SR_UIF | TIM_SR_CC1OF | TIM_SR_CC2OF);
+    const bool valid = capture_seen && !(flags & TIM_SR_UIF) &&
+                       measured_period != 0 && measured_high <= measured_period;
+    capture_seen = true;
+    if (!valid) return false;
+    *period = measured_period;
+    *high = measured_high;
+    *counter_hz = capture_clock;
+    return true;
+}
+
+void pwm_capture_stop(void)
+{
+    TIM4->CR1 = 0;
+    TIM4->CCER = 0;
+    HAL_GPIO_DeInit(GPIOB, GPIO_PIN_6);
+}

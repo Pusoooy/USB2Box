@@ -8,10 +8,13 @@ from pathlib import Path
 import struct
 from threading import Event, RLock, Thread
 from time import monotonic, sleep
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable, Concatenate, ParamSpec, TypeVar
 
 from .protocol import Busy, Deadline, DeviceError, ProtocolError, RemoteError, check, packet, receive
 from .transport import BulkTransport, MockTransport, Transport, discover
+
+Parameters = ParamSpec("Parameters")
+Result = TypeVar("Result")
 
 U16 = struct.Struct("<H")
 U32 = struct.Struct("<I")
@@ -38,6 +41,8 @@ class ADCBlock:
     resolution: int
     running: bool
     awaiting_trigger: bool
+    more_available: bool
+    threshold_seen: bool
     samples: tuple[int, ...]
 
     @classmethod
@@ -47,7 +52,7 @@ class ADCBlock:
         rate, offset, dropped, count, bits, flags = struct.unpack_from("<IIIHBB", raw)
         if len(raw) != 16 + count * 2:
             raise ProtocolError("ADC metadata does not match samples")
-        return cls(rate, offset, dropped, bits, bool(flags & 1), bool(flags & 2),
+        return cls(rate, offset, dropped, bits, bool(flags & 1), bool(flags & 2), bool(flags & 4), bool(flags & 8),
                    struct.unpack_from(f"<{count}H", raw, 16))
 
     def save(self, filename: str | Path) -> None:
@@ -128,7 +133,14 @@ class USB2XXX:
                 self._error = error  # A late reply makes this transport session ambiguous.
                 raise
             self.last_request_id = request
-            check(status)
+            try:
+                check(status)
+            except RemoteError as error:
+                if len(raw) == 12:
+                    stage, resource, retry, _, tick, completed = struct.unpack("<BBBBII", raw)
+                    error.detail = {"stage": stage, "resource": None if resource == 255 else resource,
+                                    "retryable": bool(retry), "device_ms": tick, "completed": completed}
+                raise
             return raw
 
     def close(self) -> None:
@@ -154,6 +166,11 @@ class USB2XXX:
         version = tuple(self.call(SYS, 3))
         return {"version": version, "fragment": fragment, "message": maximum,
                 "lease_ms": lease, "simulated": self.simulated}
+
+    def diagnostics(self) -> dict:
+        values = struct.unpack("<IIIII", self.call(6, 1))
+        return dict(zip(("requests", "invalid_headers", "errors", "lease_expired", "resets"),
+                        values, strict=True))
 
     def resources(self) -> list[int]:
         return list(self.call(SYS, 8))
@@ -248,6 +265,17 @@ class USB2XXX:
     def pwm_status(self, group: int) -> dict:
         return self._pwm_state(self.call(PWM, 5, bytes((group,))))
 
+    def pwm_capture_start(self, frequency: int = 1000000) -> None:
+        self.call(PWM, 6, U32.pack(frequency))
+
+    def pwm_capture_read(self) -> dict:
+        period, high, rate = struct.unpack("<III", self.call(PWM, 7))
+        return {"frequency_hz": rate / period, "duty_ppm": round(high * 1000000 / period),
+                "counter_hz": rate}
+
+    def pwm_capture_stop(self) -> None:
+        self.call(PWM, 8)
+
     def pwm_stop(self, group: int) -> None:
         self.call(PWM, 4, bytes((group,)))
 
@@ -285,6 +313,9 @@ class USB2XXX:
 
     def adc_start(self, rate: int, samples: int = 0, pre: int = 0, post: int = 0) -> None:
         self.call(ADC, 3, struct.pack("<IHHH", rate, samples, pre, post))
+
+    def adc_watchdog(self, channel: int, low: int, high: int) -> None:
+        self.call(ADC, 8, struct.pack("<BHH", channel, low, high))
 
     def adc_trigger(self) -> None:
         self.call(ADC, 5)
@@ -339,14 +370,18 @@ class AsyncDevice:
         return await asyncio.to_thread(self.device.call, service, opcode, payload)
 
     async def capabilities(self) -> dict:
-        return await asyncio.to_thread(self.device.capabilities)
+        return await self.run(USB2XXX.capabilities)
+
+    async def run(self, operation: Callable[Concatenate[USB2XXX, Parameters], Result],
+                  *args: Parameters.args, **kwargs: Parameters.kwargs) -> Result:
+        return await asyncio.to_thread(operation, self.device, *args, **kwargs)
 
     async def capture_stream(self) -> AsyncIterator[ADCBlock]:
         while True:
             block = await asyncio.to_thread(self.device.adc_next_stream)
             if block.samples:
                 yield block
-            if not block.running:
+            if not block.running and not block.more_available:
                 return
 
 

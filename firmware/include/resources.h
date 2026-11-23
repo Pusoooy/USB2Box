@@ -13,7 +13,7 @@ enum {
 #define RESOURCE_TIMER(timer) ((uint8_t)(RESOURCE_TIM_BASE + (timer)))
 
 typedef struct {
-    uint8_t owner[RESOURCE_COUNT];
+    uint8_t owner[RESOURCE_COUNT], last_conflict;
 } resources;
 
 typedef struct {

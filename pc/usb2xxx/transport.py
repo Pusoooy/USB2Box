@@ -88,7 +88,17 @@ def discover(vid: int, pid: int):
     if not 1 <= vid <= 0xffff or not 1 <= pid <= 0xffff:
         raise ValueError("supply a legally assigned nonzero VID/PID")
     import usb.core
-    return list(usb.core.find(find_all=True, idVendor=vid, idProduct=pid))
+    import usb.backend.libusb1
+    location = os.getenv("USB2XXX_LIBUSB")
+    backend = usb.backend.libusb1.get_backend(find_library=lambda _: location) if location else None
+    if location and backend is None:
+        raise Disconnected("Unable to load configured libusb library")
+    try:
+        return list(usb.core.find(find_all=True, idVendor=vid, idProduct=pid, backend=backend))
+    except usb.core.NoBackendError as error:
+        raise Disconnected("Install libusb or set USB2XXX_LIBUSB") from error
+    except usb.core.USBError as error:
+        raise Disconnected("USB device enumeration failed") from error
 
 
 class BulkTransport(Transport):

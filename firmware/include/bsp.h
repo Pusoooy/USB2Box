@@ -13,6 +13,7 @@ typedef enum {
 
 bsp_clock_status bsp_init(void);
 uint32_t bsp_millis(void);
+bool bsp_handle_clock_failure(void);
 
 /* Call after the USB device controller is configured and soft-disconnected.
  * The DCD owns the USB interrupt enable and connect sequence.

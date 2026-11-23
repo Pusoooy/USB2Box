@@ -1,16 +1,24 @@
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "app.h"
 #include <stdio.h>
 #include <time.h>
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
 #endif
 
 static uint32_t now_ms(void)
 {
+#ifdef _WIN32
+    return (uint32_t)GetTickCount64();
+#else
     struct timespec now;
-    timespec_get(&now, TIME_UTC);
+    clock_gettime(CLOCK_MONOTONIC, &now);
     return (uint32_t)((uint64_t)now.tv_sec * 1000u + now.tv_nsec / 1000000u);
+#endif
 }
 
 int main(void)

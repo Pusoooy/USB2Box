@@ -16,6 +16,7 @@ GROUPS = {
     "USART2": [("PA2", "USART2_TX", 7), ("PA3", "USART2_RX", 7)],
     "PWM1": [("PA0", "TIM5_CH1", 2)],
     "PWM2": [("PC6", "TIM3_CH1", 2)],
+    "PWM_CAPTURE": [("PB6", "TIM4_CH1", 2)],
     "SPI1": [("PA5", "SPI1_SCK", 5), ("PA6", "SPI1_MISO", 5),
              ("PA7", "SPI1_MOSI", 5), ("PB12", "GPIO", "output")],
     "ADC1": [(pin, f"ADC1_IN{channel}", "analog") for channel, pin in enumerate(

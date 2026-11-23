@@ -74,3 +74,18 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M11
 
 `make test-mcp` 使用官方客户端启动两个 stdio 子进程，验证工具 schema、资源读取、拒绝未授权写、PWM 限时、分块采集和安全停止。回归和交叉构建退出 0。实板 MCP NOT_RUN。 [原始日志](evidence/m11-verify.log)
+
+## M12 软件集成
+
+| 验证项 | 结果 | 证据 |
+|---|---|---|
+| C11 Host 与异常路径 | HOST_MOCK_PASS | UBSan 下运行设备、队列与五外设单测，全量回归通过 |
+| 固件构建 | ARM_BUILD_PASS | ARM GCC 14.2.1、binutils 2.44。默认 HSI、8 MHz 和 25 MHz 候选分别构建 Debug/Release，核对所有启用的中断向量、栈边界、分配器缺失 |
+| 跨服务和安全 | HOST_MOCK_PASS | SDK 同时持有双 UART、I²C、PWM、SPI 和 ADC。覆盖资源拒绝、关闭租约、诊断错误上下文和采集结束 |
+| GUI、MCP | HOST_MOCK_PASS | PySide6 6.9.3 Linux offscreen，官方 MCP 客户端 stdio，含权限、长度上限和停止 |
+| Debian 构建缓存 | PASS | 已校验的 .deb 与源码归档在独立目录离线解包并完成 ARM 重建 |
+| Windows x64 离线候选 | Linux 静态验证通过 | 117 个文件 SHA256，PE32+ mock 与 libusb DLL，Windows target wheel 离线解析。Windows 运行和驱动未执行 |
+| H00–H09 实板验收 | NOT_RUN / WAITING_HARDWARE | 无板卡、合法 VID/PID 或 ST-Link。`make hil-verify` 按设计返回缺少实板参数 |
+| DS9716 / RM0368 PDF 复核 | NOT_RUN | ST 官方域名在当前环境返回代理 403。M0 的 ST 原厂引脚 XML 与 Embassy DMA 数据仍有锁定证据 |
+
+默认 Release Flash 42,300 B，静态 RAM 31,560 B，另预留 8 KiB 栈。默认 Debug 为 50,128 B Flash、31,568 B 静态 RAM。空环境离线安装 SDK wheel、`pip check` 及 CLI 模拟运行通过。报告覆盖了软件、交叉编译和包内容。Windows 10/11、实际 GPIO 时序、模拟精度、ADC 100 kSPS 和 USB 吞吐由 HIL 确认。V0/V1 发行签署仍待完成。[原始验证日志](evidence/m12-verify.log)
