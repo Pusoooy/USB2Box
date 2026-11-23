@@ -106,10 +106,15 @@ static uint16_t system_command(device *dev, uint16_t length, uint8_t *out,
         if (length) return STATUS_VALUE;
         stop_session(dev);
         return STATUS_OK;
+    case SYS_CANCEL:
+    case SYS_COLLECT:
+        if (!dev->active) return STATUS_SESSION;
+        break;
     default:
-        return dev->command ? dev->command(0, dev->message.opcode, dev->input,
-                                           length, out, written, now) : STATUS_OPCODE;
+        break;
     }
+    return dev->command ? dev->command(0, dev->message.opcode, dev->input,
+                                       length, out, written, now) : STATUS_OPCODE;
 }
 
 static void enqueue_reply(device *dev, const frame_header *request,

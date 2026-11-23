@@ -89,3 +89,13 @@ void jobs_reset(jobs *queue, job_step step)
     }
     queue->next = 0;
 }
+
+bool job_lane_active(const jobs *queue, uint8_t lane)
+{
+    for (unsigned i = 0; i < JOB_CAPACITY; ++i) {
+        const job *task = &queue->entries[i];
+        if (task->lane == lane && (task->state == QUEUED || task->state == RUNNING))
+            return true;
+    }
+    return false;
+}

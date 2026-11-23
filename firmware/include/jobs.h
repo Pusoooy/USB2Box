@@ -21,6 +21,7 @@ uint16_t job_submit(jobs *queue, uint32_t id, uint8_t lane, const uint8_t *data,
 void jobs_poll(jobs *queue, job_step step, uint32_t now);
 uint16_t job_cancel(jobs *queue, uint32_t id, job_step step);
 uint16_t job_collect(jobs *queue, uint32_t id, uint8_t *out, uint16_t *written);
+bool job_lane_active(const jobs *queue, uint8_t lane);
 void jobs_reset(jobs *queue, job_step step);
 
 #endif

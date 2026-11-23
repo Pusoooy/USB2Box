@@ -46,3 +46,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M4
 
 `make -j2 verify` 退出 0。双向各 40×513 B 的随机数据、断点跨环和溢出被实际测试。Release 静态 RAM 16,668 B。USART 实板 DMA 与跳线回环 NOT_RUN。 [原始日志](evidence/m4-verify.log)
+
+## M5
+
+`make -j2 verify` 退出 0，模拟总线交换主从角色，验证组合读写、接收事件及超时。PCB 上拉及数据波形 NOT_RUN。 [原始日志](evidence/m5-verify.log)
