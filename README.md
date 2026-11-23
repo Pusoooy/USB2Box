@@ -36,3 +36,16 @@
 ## 硬件阻塞与已知风险
 
 **开发板选型/外观已由用户确认：STM32F401RCT6 黑色PCB、Type-C、Black Pill风格（与此前参考图一致）。** PCB厂商/精确版本、HSE、USB D+/D-/VBUS及Type-C CC、引脚引出仍未获得物理证据；I²C只依赖内部弱上拉不能保证稳定的100kHz或更高速；ADC单个转换器，不能多通道真正同时采样；USB FS无法持续无损传送2.4MSPS×16bit的数据；WinUSB自动绑定与ROM DFU均需要实板验证；USB合法VID/PID尚未分配。
+
+## Codex Cloud 快速开始（不需要本地 CLI、文件上传）
+
+1. 打开 https://chatgpt.com/codex ，确认 GitHub 连接已授权访问私有仓库 `Pusoooy/Codex`。
+2. 选择此仓库及 `main` 分支作为云端环境的项目。
+3. 在新任务中输入：`阅读 AGENTS.md、prompts/CODEX_MASTER_PROMPT.md 和 docs/handoff.md，按照 M0 的需求验收条件直接开始开发。请写代码、运行可用测试、提交更改并更新 handoff；无真实硬件时将 HIL 结果标为 NOT_RUN。`
+4. 首先审查 Agent 的文件修改、测试输出、提交或 PR；迭代后将确认的修改合并进主分支。
+
+注意：本仓库是现有私有 `Codex` 仓库，任务资料已按正常路径提交；它不代表新建了同名 USB2XXX 仓库。云端 Codex 不能访问你个人 Windows 电脑的 ST-Link，后续需本机执行实板测试。
+
+## 仓库迁移说明
+
+原先的任务 ZIP 为 24 项（含 `SHA256SUMS.txt`）。本 GitHub 仓库已经迁入核心设计资料、拆分文档、任务指令和结构化表；部分交接/状态资料已按最新会话要求整理为仓库版本。不要将原 ZIP 的哈希清单当作 GitHub 文件当前哈希。后续 M12 发布时应按实际仓库文件重新生成 SHA256 清单。
