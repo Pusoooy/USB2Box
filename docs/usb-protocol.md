@@ -78,3 +78,7 @@
 - `HELLO=1`、`GET_CAPABILITIES=2` 返回分片上限 u16、消息上限 u16、租约毫秒 u32。`GET_VERSION=3` 返回 major/minor 两字节。`OPEN_SESSION=5` 返回租约 ID u32，`HEARTBEAT=6` 和 `CLOSE_SESSION=7` 携带该 ID。`STOP_ALL=10` 无载荷，结束当前会话。租约为 2 s，部分消息在 500 ms 无进展后清除。离开会话时调用同一个停止回调。
 - 接口 0 承载 0x01/0x81，接口 1 保留独立 IN 0x82。TinyUSB DWC2 FS 以 320 字 FIFO 为上限，64 B 端点在当前配置下分配 RX 56 字、EP0/1/2 各 16 字。BOS/MS OS 2.0 提供两个 WinUSB 接口子集。实际 FIFO 行为及 Windows 绑定待 HIL。
 - 默认 `USB_VID=0 USB_PID=0` 链接完整 USB 路径，设备保持软断开。启用设备需同时提供合法 VID/PID 和经实板确认的 HSE 配置。
+
+### UART（service 3）
+
+首字节为端口 0 或 1。配置命令 1 追加 baud u32、parity u8（0/1/2 对应无/偶/奇）、stop u8（1/2）。命令 2 开启 RX。命令 3 追加读取上限 u16，返回当前可读字节。命令 4 追加待发送数据，返回排队字节数 u16。命令 5 停止并释放端口。命令 6 返回 RX 丢失字节、硬件错误、待发送字节，各 u32。未读数据超过环形缓冲时计入丢失。

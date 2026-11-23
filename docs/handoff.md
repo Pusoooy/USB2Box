@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段：M3 资源和任务队列已通过 Host 测试，进入外设驱动。**
+**当前阶段：M4 实施进度见下文。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -34,3 +34,7 @@ STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系
 ## M3
 
 基线是 M2 `36c9c4b`。驱动应先用 `resource_reserve()` 获取 GPIO/TIM/Stream，再写硬件配置，失败后释放资源。异步操作使用每通道互斥且允许跨通道进展的 `jobs`。待接入 USB CANCEL 和结果查询。验证见 [M3 日志](evidence/m3-verify.log)。
+
+## M4
+
+M3 为 3206d11。已接入 USART1/2 双路 DMA 和 USB 服务 3。下一阶段使用 I²C 中断以避免占用 DMA1 S5/S6。

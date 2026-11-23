@@ -42,3 +42,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ## M3
 
 `make -j2 verify` 退出 0。Host 检查原子预留失败无副作用、保留引脚不可抢占、DMA Stream 互斥和非法 Channel 拒绝，也检查队列溢出、同通道串行、跨通道推进、超时回绕、取消和部分结果。资源队列此阶段尚未从固件入口调用，链接结果仍是 M2 体量。[原始日志](evidence/m3-verify.log)
+
+## M4
+
+`make -j2 verify` 退出 0。双向各 40×513 B 的随机数据、断点跨环和溢出被实际测试。Release 静态 RAM 16,668 B。USART 实板 DMA 与跳线回环 NOT_RUN。 [原始日志](evidence/m4-verify.log)

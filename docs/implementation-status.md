@@ -8,7 +8,7 @@
 | M1 | ARM Makefile + C11 启动与初始化 | ARM_BUILD_PASS / HOST_MOCK_PASS | 固定 CMSIS/HAL、手写启动与 RCC/GPIO/NVIC/OTG FS BSP。默认 HSI，显式 HSE 的时钟与 USB 电气待实板 |
 | M2 | TinyUSB / Vendor Bulk / WinUSB | ARM_BUILD_PASS / HOST_MOCK_PASS | 有界组帧和租约通过。WinUSB 枚举、0x82 业务发送、完整会话并发待后续 |
 | M3 | DMA/TIM/GPIO 资源管理与任务队列 | HOST_MOCK_PASS | 原子预留、合法候选、分通道排队、超时和取消通过；驱动接入随后续阶段 |
-| M4 | UART x2 | NOT_IMPLEMENTED | USART1/2 优先 |
+| M4 | 双UART | HOST_MOCK_PASS | USART1/2 真驱动交叉链接，通过双向模拟回环和环形缓冲测试 |
 | M5 | I2C x2 | NOT_IMPLEMENTED | 仅片内弱上拉，电气可靠性不可保证 |
 | M6 | PWM x2 | NOT_IMPLEMENTED | TIM5/TIM3 候选 |
 | M7 | SPI1 | NOT_IMPLEMENTED | SPI2 等条件扩展 |

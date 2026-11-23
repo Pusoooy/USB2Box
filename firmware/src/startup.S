@@ -17,11 +17,29 @@
 .word 0
 .word Default_Handler /* PendSV */
 .word SysTick_Handler
-.rept 67
+.rept 16
+.word Default_Handler
+.endr
+.word DMA1_Stream5_IRQHandler
+.word DMA1_Stream6_IRQHandler
+.rept 19
+.word Default_Handler
+.endr
+.word USART1_IRQHandler
+.word USART2_IRQHandler
+.rept 19
+.word Default_Handler
+.endr
+.word DMA2_Stream2_IRQHandler
+.rept 8
 .word Default_Handler
 .endr
 .word OTG_FS_IRQHandler
-.rept 17
+.rept 2
+.word Default_Handler
+.endr
+.word DMA2_Stream7_IRQHandler
+.rept 14
 .word Default_Handler
 .endr
 
