@@ -1,11 +1,11 @@
 # Implementation Status / 实现状态
 
-基线：REQ-BASE-2026-11-23-01；M0 软件切片已验证，官方 PDF 复查待完成。
+基线：REQ-BASE-2026-11-23-01；M1 工程底座已通过交叉构建与 Host 测试，官方 PDF 复查待完成。
 
 | 阶段 | 模块 | 状态 | 备注 |
 |---|---|---|---|
 | M0 | 基线、候选资源、帧头 | HOST_MOCK_PASS（单测） | ST 封装/AF 已校验。DMA 候选静态检查通过，待对照 RM0368 原表 |
-| M1 | ARM Makefile + C11 启动与初始化 | ARM_BUILD_PASS（M0 底座） | 复位镜像已链接。HAL/CMSIS、板级时钟和 USB 初始化待实现 |
+| M1 | ARM Makefile + C11 启动与初始化 | ARM_BUILD_PASS / HOST_MOCK_PASS | 固定 CMSIS/HAL、手写启动与 RCC/GPIO/NVIC/OTG FS BSP。默认 HSI，显式 HSE 的时钟与 USB 电气待实板 |
 | M2 | TinyUSB / Vendor Bulk / WinUSB | IN_PROGRESS | 帧头单测通过。完整 USB 栈、字节流解析及实板枚举待实现 |
 | M3 | DMA/TIM/GPIO 资源管理 | NOT_IMPLEMENTED | 合法固定映射及原子申请 |
 | M4 | UART x2 | NOT_IMPLEMENTED | USART1/2 优先 |

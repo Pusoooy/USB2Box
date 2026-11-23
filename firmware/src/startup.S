@@ -3,11 +3,30 @@
 .thumb
 
 .section .isr_vector, "a", %progbits
+.balign 512
 .word __stack_top
 .word Reset_Handler
-.rept 100
+.rept 5 /* NMI, HardFault, MemManage, BusFault, UsageFault */
 .word Default_Handler
 .endr
+.rept 4
+.word 0
+.endr
+.word Default_Handler /* SVCall */
+.word Default_Handler /* DebugMonitor */
+.word 0
+.word Default_Handler /* PendSV */
+.word SysTick_Handler
+.rept 67
+.word Default_Handler
+.endr
+.word OTG_FS_IRQHandler
+.rept 17
+.word Default_Handler
+.endr
+
+.weak OTG_FS_IRQHandler
+.thumb_set OTG_FS_IRQHandler, Default_Handler
 
 .section .text.Reset_Handler, "ax", %progbits
 .thumb_func
@@ -32,6 +51,7 @@ Reset_Handler:
     str r3, [r1], #4
     b 3b
 4:
+    bl SystemInit
     bl main
 
 .thumb_func

@@ -1,0 +1,4 @@
+# component sha256 upstream_archive
+cmsis-core 9f7f0080795b1635b82d9f7b084d37011866cd78365749997391ba0f9602f9fe https://codeload.github.com/ARM-software/CMSIS_5/tar.gz/2b7495b8535bdcb306dac29b9ded4cfb679d7e5c
+cmsis-device 7b70f5e3613eac5472426b206765620aa4192d96df1f21a3a5d84ea999f70c41 https://codeload.github.com/STMicroelectronics/cmsis_device_f4/tar.gz/5f41fb29d22773896c780052bf61e47fc924d524
+hal a78844548d362a8548935f877201b3deafad9aac93fc4815bc3c2fa20f99dc02 https://codeload.github.com/STMicroelectronics/stm32f4xx_hal_driver/tar.gz/c2e1406d7ea4b73aa42b98ddeb75a8670b1a5a16

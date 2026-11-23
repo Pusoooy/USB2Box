@@ -1,7 +1,7 @@
 # STM32F401RCT6 USB2XXX — Codex开发规格书与任务包
 
 - 文档基线：**2026-11-23 / REQ-BASE-2026-11-23-01**
-- 阶段：**设计与开发指令准备完成；尚无实际固件/GUI/MCP代码、ARM编译或HIL结果**。
+- 阶段：**M1 ARM 工程底座通过交叉构建与 Host 测试。USB、GUI、MCP 与 HIL 进度见实现状态**。
 - 内容：基于用户七组互动问卷的 **150项技术决策**，包含未问卷化但已明确追加的 Windows GUI 和 MCP Server 要求。
 - 范围：裸STM32F401RCT6最小板（不加外围电路），USB2IIC、USB2UART、USB2PWM、USB2SPI、USB2ADC；每类I²C/UART/PWM至少双路独立运行；Windows10/11 API、GUI、MCP。
 
@@ -29,9 +29,18 @@
 - `schemas/requirements_trace.csv`：150决策追踪起始表（初始状态均未实现/待软件开发）。
 - `docs/sources.md`：ST、TinyUSB、MCP权威资料链接。
 
-## 有意不包括的内容
+## 固件开发
 
-当前文件包是**需求/设计/任务交接包**，不是已实现产品的离线发行包。没有ARM工具链、STM32驱动源码、TinyUSB源码、Python wheel、编译产物或实板日志。后续Codex的M1/M12必须按G20=C合法打包便携工具链与第三方依赖、锁版本并校验SHA256；这一步需要Agent实际下载/取得许可后完成。**不要把当前ZIP解释为G20已经执行。**
+使用 GNU Make、ARM GCC 14.2.1、binutils 2.44、Python 3.11 或更新版本、Host C 编译器和 curl。云环境工具链位于 `/workspace/usb2box-tools/arm/usr/bin`。在仓库根目录运行：
+
+```bash
+make fetch-deps
+make verify
+```
+
+`make fetch-deps` 按 [依赖锁](tools/arm-dependencies.lock) 下载 CMSIS Core、CMSIS Device F4 和 STM32F4 HAL。离线机器可预置 `ARM_DEPS` 下的 `cmsis-core.tar.gz`、`cmsis-device.tar.gz` 和 `hal.tar.gz`，再运行同一命令核验和解包。常规构建和 `make verify` 使用本地缓存。验证产物位于 `build/debug/` 和 `build/release/`，各含 ELF、BIN、HEX 和 MAP。便携工具链与合规离线发行包的交付留在 M12。
+
+默认 `HSE_HZ=0` 使用 HSI，USB 保持未连接。实板确认晶振后可传入 `HSE_HZ=<Hz>`，产物按频率写入独立目录。支持 4–26 MHz 整数 MHz 晶振。电气和 HIL 状态见 [测试报告](docs/test-report.md)。
 
 ## 硬件阻塞与已知风险
 

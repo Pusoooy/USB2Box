@@ -2,7 +2,7 @@
 
 以 `docs/roadmap.md` 为里程碑权威；具体实施按以下顺序：
 - [ ] M0：资料核验、引脚与 DMA 冲突矩阵、需求完整性校验
-- [ ] M1：ARM GCC + Makefile / linker / startup / CMSIS / HAL 及手写初始化
+- [x] M1：ARM GCC + Makefile / linker / startup / CMSIS / HAL 及手写初始化
 - [ ] M2：USB Vendor Bulk + WinUSB 描述符 + 36B 版本协议 + Mock
 - [ ] M3：独立的 GPIO/AF/TIM/DMA/Buffer 资源管理、取消/超时
 - [ ] M4：USART1/2 双路全双工和回环测试脚本

@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段：M0 软件切片已验证，进入 M1。官方 PDF 复查仍待完成。**
+**当前阶段：M1 软件门禁通过，进入 M2。官方 PDF 复查仍待完成。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -15,13 +15,14 @@ STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系
 
 ## 最近交付
 
-- 在本地 `work` 分支运行 `make clean && make verify`，退出 0。原始记录见 [M0 日志](evidence/m0-verify.log)。基线提交为 `14065cdecc9d85d958f318d969a5d3b724a6a2f4`，本文件随 M0 变更提交。
-- 候选引脚和 DMA 矩阵、验证脚本、C11 帧头编解码及手写复位镜像已进仓库。见 [ADR 0002](adr/0002-m0-resource-contract.md) 和 [资源审查](m0-resource-audit.md)。
-- I2C2 SDA 使用 PB3 AF9 候选。需要核实 PCB 是否引出，并继续保留 PA13/PA14 两线 SWD。
-- ST 文档站返回代理 403。RM0368 Tables 28/29 及 DS9716 PDF 复查未运行，当前依据为固定版本的 ST 官方引脚 XML 和 Embassy DMA 数据。
+- 本地 `work` 分支从 M0 提交 `39eb6e4e2471d63f909e26f25fe295338f737e9d` 继续。本文件随 M1 变更提交。
+- CMSIS Core 5.9.0、CMSIS Device F4 v2.6.10 与 STM32F4 HAL v1.8.3 已按提交和 SHA-256 锁定。默认构建在 HSI 启动。显式 HSE 候选镜像建立 84/48 MHz PLL 配置，异常时尝试回退 HSI。
+- `make clean && make verify` 和两组 HSE 样本构建通过。静态 RAM 20 B，另预留 8 KiB 栈。[原始日志](evidence/m1-verify.log)
+- 实际 HSE、PCB、USB 电气及 HIL 仍为 `WAITING_HARDWARE`。DS9716 与 RM0368 PDF 请求仍返回代理 403，现有候选依据见 [M0 资源审查](m0-resource-audit.md)。
 
 ## 下一步
 
-1. 使用现有 checkout，设置 ARM GCC PATH 后运行 `make verify`。
-2. M1 固定 CMSIS Device、Core 与 STM32F4 HAL。实现手写板级时钟、NVIC、USB 时钟及待确认的显式 HSE 配置，保留保守启动与静态内存门禁。
-3. HSE、PCB、USB 电气和所有 HIL 验收保持 `WAITING_HARDWARE`。实板获取后按硬件清单执行并记录原始证据。
+1. 在现有 checkout 运行 `make verify`。云环境可将 `/workspace/usb2box-tools/arm/usr/bin` 加入 PATH。依赖缓存缺失时按 [README](../README.md) 准备。
+2. M2 固定 TinyUSB 版本，对照 STM32F401 OTG FS DCD 接口、端点和 FIFO，加入 USB 字节流拼帧、有界重组、Vendor Bulk、会话租约和端到端 Mock。复用 M0 的 [帧头与资源契约](adr/0002-m0-resource-contract.md)。
+3. M2 进入 DCD 前检查 `bsp_init()` 返回 `BSP_CLOCK_HSE_PLL`。在设备模式、软断开及 VBUS 策略配置后调用 `bsp_usb_enable_pins()`，确保 DCD 完成 IRQ 和端点初始化之后再连接。没有合法 VID/PID 时继续用 Host Mock 验证协议。
+4. 保留 PA13/PA14 SWD，I2C2 SDA 候选 PB3 AF9 及 SWO 互斥。取得实板后验证电气和走线，记录原始证据。

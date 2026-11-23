@@ -73,6 +73,12 @@
 - 必须校验HSE实际频率及PLL配置，SYSCLK目标84MHz、USB时钟48MHz；HSI替代方案不可未经USB电气准确度验证即批准量产。
 - AN2606指出xB/C系统存储器Bootloader可支持DFU USB FS；但Boot模式、BOOT0脚、HSE频率限制和USB物理连线仍需实板验证。第一阶段只承诺ST-Link SWD。
 
+### M1 时钟与 USB BSP
+
+- 默认镜像以 16 MHz HSI 和 1 ms SysTick 启动。显式 `HSE_HZ` 接受 4–26 MHz 整数 MHz 晶振，优先采用 2 MHz PLL 输入，奇数 MHz 候选采用 1 MHz。VCO 为 336 MHz，P=4、Q=7，AHB/APB1/APB2 分别为 84/42/84 MHz。
+- PLL 启动或时钟切换失败时尝试恢复 HSI 并关闭 PLL/HSE，记录 BSP 时钟状态。成功切换才给 OTG FS 配置外设时钟门。OTG FS IRQ 在 BSP 中屏蔽并设优先级 6，SysTick 优先级为 15。
+- PA11/PA12 初始为无上拉的模拟输入。M2 DCD 完成设备模式与软断开设置后，才通过 `bsp_usb_enable_pins()` 切到 AF10。USB 连接、VBUS 策略和运行中的时钟异常由 M2 的 DCD 与会话层处理。
+
 ## PCB证据获取清单
 
 - [x] 用户确认：开发板与此前展示的 STM32F401RCT6 Black Pill 风格参考图一致（外观/选型确认，非电气核验）

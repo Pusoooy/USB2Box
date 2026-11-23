@@ -1,5 +1,24 @@
 # Test Report / 测试报告
 
+## M1
+
+| 验证项 | 结果 | 证据 |
+|---|---|---|
+| 固定依赖下载与离线校验 | PASS | 空缓存 `make fetch-deps`；`make offline-verify` 校验归档 SHA-256 和解包内容。人为修改的临时 HAL 头文件副本被拒绝 |
+| 时钟选择与回退 | HOST_MOCK_PASS | `make test-clock` 覆盖 23 个 HSE 频率、默认 HSI、非法频率和两种回退结果 |
+| STM32F401RC 镜像 | ARM_BUILD_PASS | `make -j2 verify`，以及 `make -j2 HSE_HZ=8000000 test-arm`、`make -j2 HSE_HZ=25000000 test-arm`。六份镜像通过复位、SysTick、OTG FS 向量、栈边界和无动态分配器检查 |
+| 构建拒绝无效时钟 | PASS | `make HSE_HZ=25000001 debug` 按设计在编译期拒绝 |
+| 实板晶振、时钟精度、烧录、枚举与 HIL | NOT_RUN / WAITING_HARDWARE | 无实板 |
+| DS9716 与 RM0368 原表复查 | NOT_RUN | ST 域名仍返回代理 HTTP 403 |
+
+| 构建配置 | Debug Flash（BIN 字节） | Release Flash（BIN 字节） | 静态 RAM（字节） |
+|---|---:|---:|---:|
+| 默认 HSI | 4,360 | 3,928 | 20 |
+| HSE 8 MHz 候选 | 4,440 | 3,936 | 20 |
+| HSE 25 MHz 候选 | 4,388 | 3,936 | 20 |
+
+静态 RAM 为 .data 12 B 和 .bss 8 B，另预留 8 KiB 栈。HSE 两组频率只用于交叉构建样本。环境为 Debian 13 x86-64，Host GCC 14.2.0、ARM GCC 14.2.1、binutils 2.44，验证序列退出 0。[原始验证日志](evidence/m1-verify.log)
+
 ## M0
 
 | 验证项 | 结果 | 证据 |
@@ -12,6 +31,6 @@
 | 烧录、USB/WinUSB、GPIO/DMA、外设性能与 HIL | NOT_RUN / WAITING_HARDWARE | 无实板 |
 | MockTransport、SDK、Windows GUI、MCP | NOT_IMPLEMENTED | 后续里程碑 |
 
-Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。执行 `make clean && make verify && git diff --check`，退出 0。两份 ARM 镜像均为 480 B Flash，静态 RAM 0 B，链接脚本保留 8 KiB 栈空间。当前镜像只包含复位启动和空闲循环。
+Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。执行 `make clean && make verify && git diff --check`，退出 0。两份 ARM 镜像均为 480 B Flash，静态 RAM 0 B，链接脚本保留 8 KiB 栈空间。M0 镜像只包含复位启动和空闲循环。
 
 [原始验证日志](evidence/m0-verify.log)
