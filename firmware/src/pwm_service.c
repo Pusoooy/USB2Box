@@ -1,9 +1,9 @@
 #include "pwm_service.h"
 
 typedef struct {
-    pwm_period period;
+    pwm_period period, next;
     uint32_t deadline;
-    bool configured;
+    bool configured, updating, pulsed;
 } pwm_state;
 
 static pwm_state groups[2];
@@ -35,6 +35,7 @@ static void stop_group(resources *pool, unsigned group)
     if (!groups[group].configured) return;
     pwm_driver_stop(group);
     groups[group].configured = false;
+    groups[group].updating = groups[group].pulsed = false;
     resource_release(pool, (uint8_t)(5 + group));
 }
 
@@ -51,6 +52,23 @@ void pwm_poll(uint32_t now)
     for (unsigned group = 0; group < 2; ++group)
         if (groups[group].configured && pwm_driver_running(group) &&
             now - groups[group].deadline < 0x80000000u) pwm_driver_stop(group);
+}
+
+static void refresh_period(unsigned group)
+{
+    pwm_state *state = &groups[group];
+    if (state->updating && (!pwm_driver_running(group) || !pwm_driver_update_pending(group))) {
+        state->period = state->next;
+        state->updating = false;
+    }
+}
+
+static bool suitable_for_count(const pwm_period *period, uint32_t clock)
+{
+    const uint64_t divider = period->prescaler + 1u;
+    const uint64_t min_ticks = (clock + 99999u) / 100000u;
+    return period->compare * divider >= min_ticks &&
+           (period->reload + 1u - period->compare) * divider >= min_ticks;
 }
 
 uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
@@ -88,21 +106,34 @@ uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
     if (!length || input[0] > 1) return STATUS_VALUE;
     const unsigned group = input[0];
     pwm_state *state = &groups[group];
+    refresh_period(group);
     switch (opcode) {
     case 1:
     case 3: {
         if (length != 10 || input[9] > 1) return STATUS_VALUE;
-        if (pwm_driver_running(group)) return STATUS_BUSY;
+        const bool running = pwm_driver_running(group);
+        if (running && (opcode == 1 || state->updating)) return STATUS_BUSY;
         pwm_period period;
-        if (!pwm_calculate(pwm_driver_clock(), group == 0 ? 32 : 16,
+        const uint32_t clock = pwm_driver_clock();
+        if (!pwm_calculate(clock, group == 0 ? 32 : 16,
                            wire_u32(input + 1), wire_u32(input + 5), &period)) return STATUS_VALUE;
+        period.invert = input[9] != 0;
+        if (running) {
+            if (period.invert != state->period.invert ||
+                (state->pulsed && !suitable_for_count(&period, clock))) return STATUS_VALUE;
+            if (pwm_driver_update(group, &period)) {
+                state->next = period;
+                state->updating = true;
+                break;
+            }
+            /* The last finite pulse may have ended between the two checks. */
+        }
         resource_plan plan = {0};
         resource_add(&plan, group == 0 ? RESOURCE_PIN('A', 0) : RESOURCE_PIN('C', 6));
         resource_add(&plan, RESOURCE_TIMER(group == 0 ? 5 : 3));
         uint8_t conflict;
         const uint16_t status = resource_reserve(pool, &plan, (uint8_t)(5 + group), &conflict);
         if (status != STATUS_OK) return status;
-        period.invert = input[9] != 0;
         state->period = period;
         state->configured = true;
         break;
@@ -112,14 +143,10 @@ uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
         if (pwm_driver_running(group)) return STATUS_BUSY;
         const uint32_t duration = wire_u32(input + 1), pulses = wire_u32(input + 5);
         if (!duration || duration > 60000) return STATUS_VALUE;
-        if (pulses) {
-            const uint64_t divider = state->period.prescaler + 1;
-            const uint64_t min_ticks = pwm_driver_clock() / 100000u;
-            if (state->period.compare * divider < min_ticks ||
-                (state->period.reload + 1u - state->period.compare) * divider < min_ticks)
-                return STATUS_VALUE;
-        }
+        if (pulses && !suitable_for_count(&state->period, pwm_driver_clock()))
+            return STATUS_VALUE;
         state->deadline = now + duration;
+        state->pulsed = pulses != 0;
         pwm_driver_start(group, &state->period, pulses);
         break;
     }
@@ -133,11 +160,13 @@ uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
     default:
         return STATUS_OPCODE;
     }
-    wire_put32(out, state->period.frequency_millihz);
-    wire_put32(out + 4, state->period.duty_ppm);
-    wire_put32(out + 8, state->period.prescaler);
-    wire_put32(out + 12, state->period.reload);
-    out[16] = pwm_driver_running(group);
+    refresh_period(group);
+    const pwm_period *period = opcode == 3 && state->updating ? &state->next : &state->period;
+    wire_put32(out, period->frequency_millihz);
+    wire_put32(out + 4, period->duty_ppm);
+    wire_put32(out + 8, period->prescaler);
+    wire_put32(out + 12, period->reload);
+    out[16] = pwm_driver_running(group) ? (uint8_t)(1 | (state->updating ? 2 : 0)) : 0;
     *written = 17;
     return STATUS_OK;
 }

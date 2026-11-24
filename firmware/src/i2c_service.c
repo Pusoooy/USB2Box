@@ -10,6 +10,84 @@ typedef struct {
 static i2c_bus buses[2];
 static jobs queue;
 
+typedef struct {
+    uint32_t sequence, now;
+    uint8_t kind, count, data[I2C_SLAVE_BYTES];
+} slave_event;
+
+static struct {
+    slave_event events[I2C_EVENT_CAPACITY];
+    uint32_t head, tail, sequence, received, errors, dropped;
+} events[2];
+
+void i2c_record_slave_event(unsigned bus, uint8_t kind, const uint8_t *data,
+                             uint8_t count, uint32_t now)
+{
+    const uint32_t sequence = events[bus].sequence++;
+    if (kind == I2C_EVENT_RX) __atomic_add_fetch(&events[bus].received, count, __ATOMIC_RELAXED);
+    if (kind == I2C_EVENT_ERROR) __atomic_add_fetch(&events[bus].errors, 1, __ATOMIC_RELAXED);
+    const uint32_t head = __atomic_load_n(&events[bus].head, __ATOMIC_RELAXED);
+    const uint32_t tail = __atomic_load_n(&events[bus].tail, __ATOMIC_ACQUIRE);
+    if (head - tail == I2C_EVENT_CAPACITY) {
+        __atomic_add_fetch(&events[bus].dropped, 1, __ATOMIC_RELAXED);
+        return;
+    }
+    slave_event *event = &events[bus].events[head % I2C_EVENT_CAPACITY];
+    event->sequence = sequence;
+    event->now = now;
+    event->kind = kind;
+    event->count = count;
+    if (kind == I2C_EVENT_RX)
+        for (unsigned i = 0; i < count; ++i) event->data[i] = data[i];
+    __atomic_store_n(&events[bus].head, head + 1, __ATOMIC_RELEASE);
+}
+
+static bool take_event(unsigned bus, slave_event *event)
+{
+    const uint32_t tail = __atomic_load_n(&events[bus].tail, __ATOMIC_RELAXED);
+    if (tail == __atomic_load_n(&events[bus].head, __ATOMIC_ACQUIRE)) return false;
+    *event = events[bus].events[tail % I2C_EVENT_CAPACITY];
+    __atomic_store_n(&events[bus].tail, tail + 1, __ATOMIC_RELEASE);
+    return true;
+}
+
+static void reset_events(unsigned bus)
+{
+    /* The peripheral is disabled before reset and enabled after it. */
+    events[bus].head = events[bus].tail = events[bus].sequence = 0;
+    events[bus].received = events[bus].errors = events[bus].dropped = 0;
+}
+
+static uint16_t read_events(unsigned bus, bool legacy, uint8_t *out)
+{
+    slave_event event = {0};
+    for (unsigned i = 0; i < I2C_EVENT_CAPACITY; ++i) {
+        if (!take_event(bus, &event)) break;
+        if (!legacy || event.kind == I2C_EVENT_RX) break;
+    }
+    const uint32_t received = __atomic_load_n(&events[bus].received, __ATOMIC_RELAXED);
+    const uint32_t errors = __atomic_load_n(&events[bus].errors, __ATOMIC_RELAXED);
+    uint16_t length;
+    if (legacy) {
+        wire_put32(out, received);
+        wire_put32(out + 4, errors);
+        length = 8;
+    } else {
+        wire_put32(out, event.sequence);
+        wire_put32(out + 4, event.now);
+        wire_put32(out + 8, __atomic_load_n(&events[bus].dropped, __ATOMIC_RELAXED));
+        wire_put32(out + 12, received);
+        wire_put32(out + 16, errors);
+        out[20] = event.kind;
+        out[21] = event.count;
+        length = 22;
+    }
+    if (event.kind == I2C_EVENT_RX) {
+        for (unsigned i = 0; i < event.count; ++i) out[length++] = event.data[i];
+    }
+    return length;
+}
+
 static bool init_bus(unsigned bus)
 {
     const i2c_bus *b = &buses[bus];
@@ -61,7 +139,12 @@ static uint16_t transfer_step(job *task, bool cancel)
     return JOB_PENDING;
 }
 
-void i2c_poll(uint32_t now) { jobs_poll(&queue, transfer_step, now); }
+void i2c_poll(uint32_t now)
+{
+    for (unsigned bus = 0; bus < 2; ++bus)
+        if (buses[bus].configured && buses[bus].slave) i2c_driver_service(bus);
+    jobs_poll(&queue, transfer_step, now);
+}
 
 static bool bus_busy(unsigned bus)
 {
@@ -74,6 +157,7 @@ void i2c_stop_all(resources *pool)
     for (unsigned bus = 0; bus < 2; ++bus) {
         if (buses[bus].configured) i2c_driver_deinit(bus);
         buses[bus].configured = buses[bus].waiting = false;
+        reset_events(bus);
         resource_release(pool, (uint8_t)(3 + bus));
     }
 }
@@ -120,6 +204,7 @@ uint16_t i2c_command(resources *pool, uint8_t opcode, const uint8_t *input,
         b->speed = speed;
         b->slave = false;
         b->address = 0;
+        reset_events(bus);
         b->configured = init_bus(bus);
         if (!b->configured) resource_release(pool, owner);
         return b->configured ? STATUS_OK : STATUS_IO;
@@ -129,6 +214,7 @@ uint16_t i2c_command(resources *pool, uint8_t opcode, const uint8_t *input,
             (input[1] && (input[2] < 8 || input[2] > 119))) return STATUS_VALUE;
         if (!b->configured || bus_busy(bus)) return STATUS_BUSY;
         i2c_driver_deinit(bus);
+        reset_events(bus);
         b->slave = input[1] != 0;
         b->address = input[2];
         b->configured = init_bus(bus);
@@ -144,20 +230,16 @@ uint16_t i2c_command(resources *pool, uint8_t opcode, const uint8_t *input,
             return STATUS_VALUE;
         i2c_driver_slave_tx(bus, input + 1, (uint8_t)(length - 1));
         return STATUS_OK;
-    case 5: {
+    case 5:
+    case 7:
         if (length != 1 || !b->configured || !b->slave) return STATUS_VALUE;
-        i2c_slave_event event;
-        i2c_driver_slave_event(bus, &event);
-        wire_put32(out, event.received);
-        wire_put32(out + 4, event.errors);
-        for (unsigned i = 0; i < event.count; ++i) out[8 + i] = event.bytes[i];
-        *written = (uint16_t)(8 + event.count);
+        *written = read_events(bus, opcode == 5, out);
         return STATUS_OK;
-    }
     case 6:
         if (length != 1 || bus_busy(bus)) return STATUS_BUSY;
         if (b->configured) i2c_driver_deinit(bus);
         b->configured = false;
+        reset_events(bus);
         resource_release(pool, owner);
         return STATUS_OK;
     default:

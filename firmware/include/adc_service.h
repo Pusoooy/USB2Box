@@ -3,7 +3,10 @@
 
 #include "resources.h"
 
-enum { ADC_RANKS = 16, ADC_BLOCK = 128, ADC_CACHE = 4096 };
+enum {
+    ADC_RANKS = 16, ADC_BLOCK = 128, ADC_CACHE = 4096,
+    ADC_STREAM_CREDIT = 7, ADC_TAGGED_CREDIT = 9,
+};
 typedef struct {
     uint8_t resolution, ranks, channels[ADC_RANKS], times[ADC_RANKS];
     bool watchdog;
@@ -15,7 +18,7 @@ uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
                      uint16_t length, uint8_t *out, uint16_t *written);
 void adc_poll(void);
 void adc_stop_all(resources *pool);
-uint16_t adc_stream_payload(uint8_t *out);
+uint16_t adc_stream_payload(uint8_t *out, uint8_t *opcode);
 
 uint32_t adc_driver_start(const adc_config *config, uint32_t rate, uint16_t samples);
 void adc_driver_stop(void);

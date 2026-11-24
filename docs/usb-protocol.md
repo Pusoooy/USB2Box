@@ -107,3 +107,13 @@
 - 帧级错误有 12 B 上下文。阶段、冲突资源 ID（0xff 未知）、可重试标记、保留（各 u8），再附设备时间与已完成字节数（各 u32）。异步任务结果使用各自已有的部分读写契约。
 - PWM 输入捕获操作 6 配置 TIM4 的目标计数频率 Hz u32。操作 7 返回周期、高电平宽度和实际计数 Hz（各 u32），操作 8 释放输入。PB6 AF2 与 USART1 TX 冲突，因此以资源管理器拒绝同时使用。
 - ADC 块标记 bit2 表示缓冲还有数据，bit3 表示模拟看门狗越限。命令 8 在空闲时设置扫描序列内的看门狗通道 u8 与低、高阈值 u16。越限可触发预后采集，当前触发位置以服务收到 DMA 回调后的块边界为准。0x82 有最后一块标记以便采集结束时回收 credit。
+
+## Version 1.0 compatible extensions
+
+SYS operation 12 has an empty input and returns a u32 mask. Bit 0 indicates tagged bulk streaming, bit 1 indicates I²C slave FIFO records, and bit 2 indicates live PWM updates. The 36-byte header and the existing opcode payloads remain compatible.
+
+- UART operations 7 and 8 accept a port byte and, respectively, a u32 tag or u16 added credit. Tag zero unsubscribes. Each subscribed port owns the receive consumer and command 3 returns busy. Frames have type 4, service 2, opcode 8, IDs 2 and 3, and a payload of tag, first-byte offset, device time in ms at buffer readout, cumulative lost bytes and errors (all u32), followed by at most 492 data bytes.
+- Tagged ADC credit operation 9 takes a nonzero tag u32 and credit u16. A new tag resets old credit. Stream ID 1 responds with service 5 and opcode 9 and places the tag before the original ADC block. Legacy opcode 7 remains available.
+- Each stream gets its own wrapping u16 sequence. Firmware holds at most 16 credits per stream and schedules ready sources round-robin. The SDK grants one block at a time and keeps an outstanding credit through a read timeout.
+- I²C operation 7 pops the oldest event for the specified bus. Layout is sequence, device time in ms, dropped events, bytes received and errors (u32), kind and count (u8), then RX bytes when kind=1. Kind 0 means empty, 2 means TX (bytes loaded into the controller), and 3 means error. The eight-record FIFO drops new events when full and retains the drop count. Legacy operation 5 pops an RX event using the original summary layout and skips other event kinds.
+- PWM operation 3 accepts a live frequency/duty change with unchanged polarity and updates at the next timer rollover. The final status byte reports running in bit 0 and pending in bit 1. Operation 3 acknowledges the quantized new settings, while operation 5 reports the applied plan. The original stop deadline and remaining pulse count still apply.

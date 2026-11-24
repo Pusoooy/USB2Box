@@ -89,3 +89,7 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 | DS9716 / RM0368 PDF 复核 | NOT_RUN | ST 官方域名在当前环境返回代理 403。M0 的 ST 原厂引脚 XML 与 Embassy DMA 数据仍有锁定证据 |
 
 默认 Release Flash 42,300 B，静态 RAM 31,560 B，另预留 8 KiB 栈。默认 Debug 为 50,128 B Flash、31,568 B 静态 RAM。空环境离线安装 SDK wheel、`pip check` 及 CLI 模拟运行通过。报告覆盖了软件、交叉编译和包内容。Windows 10/11、实际 GPIO 时序、模拟精度、ADC 100 kSPS 和 USB 吞吐由 HIL 确认。V0/V1 发行签署仍待完成。[原始验证日志](evidence/m12-verify.log)
+
+## M12 follow-up — Streams, slave FIFO, and live PWM
+
+`make -j2 verify-all PYTHON=/workspace/usb2box-tools/pcenv/bin/python` exited 0 on Debian Linux with ARM GCC 14.2.1. Host tests covered three simultaneous bulk sources, timeouts with retained credit, sequence wrap, draining a partly sent frame, legacy and FIFO I²C reads, per-bus overflow and ordering, and boundary updates with unchanged PWM limits. SDK and Qt tests also used the C endpoint multiplexer. A Linux offscreen plugin message and an upstream MCP settings warning were emitted. Debug linked at 52,660 B flash and 32,888 B static RAM. Release linked at 44,548 B flash and 32,884 B static RAM. Each reserves a separate 8 KiB stack. USB wire timing and PWM waveforms are `NOT_RUN`. [Original log](evidence/m12-streams-verify.log)

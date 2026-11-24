@@ -19,7 +19,7 @@ STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系
 - 使用当前 checkout，执行 `bash tools/install_cloud.sh` 后设置 ARM GCC PATH。标准回归为 `make verify`。CPython 3.12 x86-64 的 PC 工具依赖使用 `pc/requirements-linux-cp312.lock`，完整回归运行 `make verify-all`。
 - [HIL 指引](hil-fixtures.md) 给出 ST-Link 下载、USB 识别和五个夹具。首次硬件工作核验 PCB/晶振/VBUS 走线及合法 VID/PID，再执行 H00 到 H09。实物缺失时硬件记录仍为 `NOT_RUN`。
 - Windows x64 wheelhouse、MinGW 模拟器、可替换 libusb 和 SHA256 清单经 Linux 构建验证。Windows 运行时需已有 CPython 3.12，待实际 Windows 10/11 测试与公开再分发审查。[离线工作台说明](windows-offline.md)
-- 软件细项仍可推进。当前 UART 的上位机读取依赖轮询，I²C 从机返回最新事件及累计计数，PWM 运行中配置更新返回 busy，ADC 阈值触发以 DMA 块边界确定位置。资源管理、MCP 和 HIL 尚未生成真实跨进程或极限吞吐数据。具体通过项见 [测试报告](test-report.md)。
+- 第二轮集成实现了双 UART 数据推送、ADC/UART 复用、有界 I²C 从机 FIFO 和 PWM 运行中频率/占空比更新。新增功能可由 SYS 12 查询，原有帧布局兼容。实板时序、跨进程真机和吞吐数据仍待采集。[测试报告](test-report.md)
 
 ## 历史交接
 

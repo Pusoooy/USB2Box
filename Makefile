@@ -31,7 +31,7 @@ ARM_VENDOR_SOURCES := $(ARM_DEPS)/cmsis-device/Source/Templates/system_stm32f4xx
 ARM_SOURCES := firmware/src/startup.S firmware/src/main.c firmware/src/frame.c \
 	firmware/src/bsp.c firmware/src/clock_policy.c firmware/src/memory.c \
 	firmware/src/device.c firmware/src/app.c firmware/src/uart_service.c firmware/src/uart_stm32.c firmware/src/i2c_service.c firmware/src/i2c_stm32.c firmware/src/pwm_service.c firmware/src/pwm_stm32.c firmware/src/spi_service.c firmware/src/spi_stm32.c firmware/src/adc_service.c firmware/src/adc_stm32.c firmware/src/jobs.c firmware/src/resources.c firmware/src/usb_link.c firmware/src/usb_descriptors.c \
-	$(ARM_VENDOR_SOURCES)
+	firmware/src/stream.c $(ARM_VENDOR_SOURCES)
 ARM_HEADERS := $(wildcard firmware/include/*.h firmware/src/*.h)
 ARM_LINKER := firmware/stm32f401rc.ld
 
@@ -143,7 +143,7 @@ test-i2c: build/host/test-i2c
 test-host: test-i2c
 
 HOST_PWM_SOURCES := firmware/src/pwm_service.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/pwm_mock.c
-build/host/test-pwm: tests/test_pwm.c $(HOST_PWM_SOURCES) $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
+build/host/test-pwm: tests/test_pwm.c $(HOST_PWM_SOURCES) $(ARM_HEADERS) host/mock_clock.h build/generated/dma_routes.inc Makefile
 	mkdir -p $(@D)
 	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
 
@@ -175,9 +175,19 @@ test-adc: build/host/test-adc
 
 test-host: test-adc
 
-MOCK_SOURCES := $(sort $(HOST_UART_SOURCES) $(HOST_I2C_SOURCES) $(HOST_PWM_SOURCES) $(HOST_SPI_SOURCES) $(HOST_ADC_SOURCES) firmware/src/app.c)
+MOCK_SOURCES := $(sort $(HOST_UART_SOURCES) $(HOST_I2C_SOURCES) $(HOST_PWM_SOURCES) $(HOST_SPI_SOURCES) $(HOST_ADC_SOURCES) firmware/src/app.c firmware/src/stream.c)
+build/host/test-stream: tests/test_stream.c $(sort $(HOST_UART_SOURCES) $(HOST_ADC_SOURCES)) firmware/src/stream.c $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
+	mkdir -p $(@D)
+	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
+
+.PHONY: test-stream
+test-stream: build/host/test-stream
+	./build/host/test-stream
+
+test-host: test-stream
+
 MOCK_EXE ?= build/host/mock-device
-$(MOCK_EXE): host/mock_device.c $(MOCK_SOURCES) $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
+$(MOCK_EXE): host/mock_device.c $(MOCK_SOURCES) $(ARM_HEADERS) host/mock_clock.h build/generated/dma_routes.inc Makefile
 	mkdir -p $(@D)
 	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
 

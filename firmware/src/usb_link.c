@@ -1,15 +1,15 @@
 #include "bsp.h"
-#include "adc_service.h"
+#include "stream.h"
 #include "usb_link.h"
 #include "tusb.h"
 #include "device/dcd.h"
 
 static device *link_device;
-static volatile bool must_reset;
+enum { BUS_RESET = 1, BUS_SUSPEND = 2 };
+static uint8_t bus_events;
 static uint8_t receive_buffer[64];
 static uint16_t received, consumed;
-static uint8_t stream[FRAME_HEADER_SIZE + DEVICE_FRAGMENT];
-static uint16_t stream_length, stream_offset, stream_sequence;
+static stream_mux streams;
 
 bool usb_link_start(device *dev)
 {
@@ -29,22 +29,12 @@ void usb_link_shutdown(void)
     link_device = 0;
 }
 
-static void send_stream(void)
+static void send_stream(uint32_t now)
 {
-    if (stream_offset == stream_length) {
-        const uint16_t payload = adc_stream_payload(stream + FRAME_HEADER_SIZE);
-        if (!payload) return;
-        frame_header header = {
-            .type = 4, .service = SERVICE_ADC, .opcode = 7, .flags = FLAG_FIRST | FLAG_LAST,
-            .length = payload, .total = payload, .stream_id = 1,
-            .sequence = stream_sequence++,
-        };
-        frame_encode(stream, &header);
-        stream_length = (uint16_t)(FRAME_HEADER_SIZE + payload);
-        stream_offset = 0;
-    }
-    stream_offset += (uint16_t)tud_vendor_n_write(1, stream + stream_offset,
-                                               stream_length - stream_offset);
+    uint16_t length;
+    const uint8_t *frame = stream_peek(&streams, link_device->active, now, &length);
+    if (!length) return;
+    stream_consume(&streams, (uint16_t)tud_vendor_n_write(1, frame, length));
     tud_vendor_n_write_flush(1);
 }
 
@@ -52,10 +42,15 @@ void usb_link_poll(uint32_t now)
 {
     if (!link_device) return;
     tud_task_ext(0, false);
-    if (__atomic_exchange_n(&must_reset, false, __ATOMIC_RELAXED)) {
+    const uint8_t events = __atomic_exchange_n(&bus_events, 0, __ATOMIC_RELAXED);
+    if (events & BUS_RESET) {
         device_reset(link_device);
         received = consumed = 0;
-        stream_length = stream_offset = stream_sequence = 0;
+        stream_reset(&streams);
+    } else if (events & BUS_SUSPEND) {
+        device_suspend(link_device);
+        received = consumed = 0;
+        tud_vendor_n_read_flush(0);
     }
     if (!tud_mounted() || tud_suspended()) return;
     if (consumed == received) {
@@ -71,8 +66,7 @@ void usb_link_poll(uint32_t now)
         tud_vendor_n_write_flush(0);
         device_consume_reply(link_device, accepted);
     }
-    if (link_device->active) send_stream();
-    else stream_length = stream_offset = stream_sequence = 0;
+    send_stream(now);
 }
 
 void OTG_FS_IRQHandler(void)
@@ -84,8 +78,10 @@ void tud_event_hook_cb(uint8_t rhport, uint32_t event, bool in_isr)
 {
     (void)rhport;
     (void)in_isr;
-    if (event == DCD_EVENT_BUS_RESET || event == DCD_EVENT_UNPLUGGED ||
-        event == DCD_EVENT_SUSPEND) __atomic_store_n(&must_reset, true, __ATOMIC_RELAXED);
+    if (event == DCD_EVENT_BUS_RESET || event == DCD_EVENT_UNPLUGGED)
+        __atomic_or_fetch(&bus_events, BUS_RESET, __ATOMIC_RELAXED);
+    else if (event == DCD_EVENT_SUSPEND)
+        __atomic_or_fetch(&bus_events, BUS_SUSPEND, __ATOMIC_RELAXED);
 }
 
 uint32_t tusb_time_millis_api(void)

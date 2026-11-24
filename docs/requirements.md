@@ -1,7 +1,7 @@
 # USB2XXX 正式需求规格书 / Requirements Baseline
 
 - 基线 ID：`REQ-BASE-2026-11-23-01`
-- 状态：**需求已确认；设计候选待实板确认；没有固件/GUI/MCP实现或实板测试证据**。
+- 状态：**需求已确认，固件和 PC 软件已有交叉构建与 Host Mock 证据，板级候选与 HIL 待物理核验**。
 - 目标芯片：STM32F401RCT6（LQFP64；256 KiB Flash，64 KiB SRAM）。**开发板选型/外观已由用户确认，与此前展示的黑色PCB、Type-C、Black Pill风格参考图一致**（详见`docs/board-identification.md`）；PCB准确版本、引脚引出、晶振与USB实际走线仍待实物/原理图核验。
 - 源头：`decisions.md` 包含 7 组共 150 项逐条选择，任何子项目都必须能追溯到这些决定。
 

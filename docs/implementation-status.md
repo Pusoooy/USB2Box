@@ -8,9 +8,9 @@
 | M1 | ARM Makefile + C11 启动与初始化 | ARM_BUILD_PASS / HOST_MOCK_PASS | 固定 CMSIS/HAL、手写启动与 RCC/GPIO/NVIC/OTG FS BSP。默认 HSI，显式 HSE 的时钟与 USB 电气待实板 |
 | M2 | TinyUSB / Vendor Bulk / WinUSB | ARM_BUILD_PASS / HOST_MOCK_PASS | 有界组帧和租约通过。0x82 已接入 ADC credit 流，WinUSB 枚举与物理端点吞吐待测 |
 | M3 | DMA/TIM/GPIO 资源管理与任务队列 | HOST_MOCK_PASS | 驱动已接入原子预留，I²C/SPI 作业使用分通道排队、超时、取消 |
-| M4 | 双UART | HOST_MOCK_PASS | USART1/2 真驱动交叉链接，通过双向模拟回环和环形缓冲测试 |
-| M5 | 双I²C | HOST_MOCK_PASS | 双总线中断、组合事务、从机缓存和事件，实板弱上拉待测 |
-| M6 | 双PWM | HOST_MOCK_PASS | TIM5/TIM3 独立频率组、限时、安全停机，TIM4 输入捕获；波形和有限脉冲待测 |
+| M4 | 双UART | HOST_MOCK_PASS | USART1/2 DMA 双路回环 Mock，0x82 双订阅携带偏移、时间和丢失计数 |
+| M5 | 双I²C | HOST_MOCK_PASS | 双总线中断、组合事务、从机八事件 FIFO 与溢出统计，实板弱上拉待测 |
+| M6 | 双PWM | HOST_MOCK_PASS | TIM5/TIM3 独立频率组、周期边界更新、限时、安全停机和 TIM4 输入捕获；波形待测 |
 | M7 | SPI1 | HOST_MOCK_PASS | SPI1 主机 4 模式及片选资源，DMA 全双工、分段和取消 |
 | M8 | ADC1 | HOST_MOCK_PASS | ADC1 扫描、软件/定时器触发，有限及持续采集、超量停止，0x82 credits |
 | M9 | Python SDK/CLI | HOST_MOCK_PASS | 同步/异步 API、客户端独占、共享 C 模拟器与 wheel；Windows 无实测 |

@@ -16,10 +16,12 @@ int main(void)
     for (unsigned i = 0; i < 4; ++i) adc_poll();
     uint8_t credit[2] = {2, 0};
     assert(adc_command(&pool, 7, credit, sizeof credit, out, &written) == STATUS_OK);
-    assert(adc_stream_payload(out) == 512 && wire_u16(out + 12) == 248);
+    uint8_t opcode;
+    assert(adc_stream_payload(out, &opcode) == 512 && wire_u16(out + 12) == 248);
+    assert(opcode == ADC_STREAM_CREDIT);
     assert(wire_u16(out + 16) == 310 && wire_u16(out + 18) == 358);
-    assert(adc_stream_payload(out) == 34 && wire_u32(out + 4) == 248 && out[15] == 0);
-    assert(adc_stream_payload(out) == 0);
+    assert(adc_stream_payload(out, &opcode) == 34 && wire_u32(out + 4) == 248 && out[15] == 0);
+    assert(adc_stream_payload(out, &opcode) == 0);
 
     wire_put16(start + 4, 0);
     wire_put16(start + 6, 10);

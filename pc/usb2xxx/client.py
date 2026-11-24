@@ -11,6 +11,7 @@ from time import monotonic, sleep
 from typing import AsyncIterator, Callable, Concatenate, ParamSpec, TypeVar
 
 from .protocol import Busy, Deadline, DeviceError, ProtocolError, RemoteError, check, packet, receive
+from .streams import StreamReceiver, StreamSubscription
 from .transport import BulkTransport, MockTransport, Transport, discover
 
 Parameters = ParamSpec("Parameters")
@@ -19,6 +20,9 @@ Result = TypeVar("Result")
 U16 = struct.Struct("<H")
 U32 = struct.Struct("<I")
 SYS, I2C, UART, PWM, SPI, ADC = 0, 1, 2, 3, 4, 5
+FEATURE_BULK_STREAMS = 1 << 0
+FEATURE_I2C_EVENTS = 1 << 1
+FEATURE_PWM_UPDATE = 1 << 2
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,29 @@ class I2CMessage:
         if not 1 <= count <= 255 or (self.read and self.data):
             raise ValueError("I2C message must be either a read length or write bytes")
         return bytes((bool(self.read), count)) + self.data
+
+
+@dataclass(frozen=True)
+class I2CSlaveEvent:
+    sequence: int
+    device_ms: int
+    dropped: int
+    received: int
+    errors: int
+    kind: str | None
+    count: int
+    data: bytes
+
+    @classmethod
+    def decode(cls, raw: bytes) -> I2CSlaveEvent:
+        if len(raw) < 22:
+            raise ProtocolError("short I2C slave event")
+        sequence, tick, dropped, received, errors, kind, count = struct.unpack_from("<IIIIIBB", raw)
+        if (kind > 3 or count > 64 or len(raw) != 22 + (count if kind == 1 else 0)
+                or (kind in (0, 3) and count)):
+            raise ProtocolError("invalid I2C slave event")
+        return cls(sequence, tick, dropped, received, errors, (None, "rx", "tx", "error")[kind],
+                   count, raw[22:])
 
 
 @dataclass(frozen=True)
@@ -69,6 +96,40 @@ class ADCBlock:
             path.write_bytes(struct.pack(f"<{len(self.samples)}H", *self.samples))
 
 
+@dataclass(frozen=True)
+class UARTBlock:
+    port: int
+    offset: int
+    device_ms: int
+    dropped: int
+    errors: int
+    sequence: int
+    data: bytes
+
+
+class UARTSubscription:
+    def __init__(self, device: USB2XXX, port: int, subscription: StreamSubscription):
+        self._device = device
+        self.port = port
+        self._subscription = subscription
+
+    def __enter__(self) -> UARTSubscription:
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def read(self, timeout: float = 0.8) -> UARTBlock:
+        frame = self._subscription.read(timeout)
+        if len(frame.payload) <= 20:
+            raise ProtocolError("invalid UART stream payload")
+        offset, now, dropped, errors = struct.unpack_from("<IIII", frame.payload, 4)
+        return UARTBlock(self.port, offset, now, dropped, errors, frame.sequence, frame.payload[20:])
+
+    def close(self) -> None:
+        self._device._uart_unsubscribe(self.port, self._subscription)
+
+
 class USB2XXX:
     def __init__(self, transport: Transport):
         self._transport = transport
@@ -76,6 +137,10 @@ class USB2XXX:
         self._lock = RLock()
         self._job_lock = RLock()
         self._adc_lock = RLock()
+        self._bulk: StreamReceiver | None = None
+        self._uart_streams: dict[int, StreamSubscription] = {}
+        self._adc_stream: StreamSubscription | None = None
+        self._features: int | None = None
         self._request = 0
         self._job = 0
         self._closed = Event()
@@ -155,7 +220,11 @@ class USB2XXX:
             finally:
                 self._closed.set()
         self._thread.join(timeout=1)
-        self._transport.close()
+        try:
+            if self._bulk:
+                self._bulk.close()
+        finally:
+            self._transport.close()
 
     def stop_all(self) -> None:
         self.call(SYS, 10)
@@ -165,7 +234,26 @@ class USB2XXX:
         fragment, maximum, lease = struct.unpack("<HHI", self.call(SYS, 2))
         version = tuple(self.call(SYS, 3))
         return {"version": version, "fragment": fragment, "message": maximum,
-                "lease_ms": lease, "simulated": self.simulated}
+                "lease_ms": lease, "features": self.features(), "simulated": self.simulated}
+
+    def features(self) -> int:
+        with self._lock:
+            if self._features is None:
+                try:
+                    self._features = U32.unpack(self.call(SYS, 12))[0]
+                except RemoteError as error:
+                    if error.status != 2:
+                        raise
+                    self._features = 0
+            return self._features
+
+    def _bulk_reader(self) -> StreamReceiver:
+        with self._lock:
+            if self._closed.is_set():
+                raise DeviceError("device session is closed")
+            if self._bulk is None:
+                self._bulk = StreamReceiver(self._transport)
+            return self._bulk
 
     def diagnostics(self) -> dict:
         values = struct.unpack("<IIIII", self.call(6, 1))
@@ -194,7 +282,39 @@ class USB2XXX:
         return struct.unpack("<III", self.call(UART, 6, bytes((port,))))
 
     def uart_stop(self, port: int) -> None:
-        self.call(UART, 5, bytes((port,)))
+        with self._lock:
+            self.call(UART, 5, bytes((port,)))
+            stream = self._uart_streams.pop(port, None)
+            if stream is not None:
+                stream.close()
+
+    def uart_subscribe(self, port: int) -> UARTSubscription:
+        if port not in (0, 1):
+            raise ValueError("UART port must be 0 or 1")
+        with self._lock:
+            if not self.features() & FEATURE_BULK_STREAMS:
+                raise DeviceError("firmware does not support UART bulk streaming")
+            if port in self._uart_streams:
+                raise Busy(0x2001)
+            channel = bytes((port,))
+            subscription = self._bulk_reader().subscribe(
+                (UART, 8, port + 2), lambda tag: self.call(UART, 8, channel + U16.pack(1)))
+            try:
+                self.call(UART, 7, channel + U32.pack(subscription.tag))
+            except BaseException:
+                subscription.close()
+                raise
+            self._uart_streams[port] = subscription
+            return UARTSubscription(self, port, subscription)
+
+    def _uart_unsubscribe(self, port: int, subscription: StreamSubscription) -> None:
+        with self._lock:
+            if self._uart_streams.get(port) is not subscription:
+                return
+            del self._uart_streams[port]
+            subscription.close()
+            if not self._closed.is_set():
+                self.call(UART, 7, struct.pack("<BI", port, 0))
 
     def _new_job(self) -> int:
         with self._job_lock:
@@ -238,6 +358,9 @@ class USB2XXX:
         raw = self.call(I2C, 5, bytes((bus,)))
         return *struct.unpack_from("<II", raw), raw[8:]
 
+    def i2c_next_slave_event(self, bus: int) -> I2CSlaveEvent:
+        return I2CSlaveEvent.decode(self.call(I2C, 7, bytes((bus,))))
+
     def i2c_transfer(self, bus: int, address: int, messages: list[I2CMessage],
                      timeout_ms: int = 100) -> bytes:
         job = self._new_job()
@@ -253,11 +376,16 @@ class USB2XXX:
         raw = self.call(PWM, 1, struct.pack("<BIIB", group, frequency_hz, duty_ppm, invert))
         return self._pwm_state(raw)
 
+    def pwm_update(self, group: int, frequency_hz: int, duty_ppm: int,
+                   invert: bool = False) -> dict:
+        raw = self.call(PWM, 3, struct.pack("<BIIB", group, frequency_hz, duty_ppm, invert))
+        return self._pwm_state(raw)
+
     @staticmethod
     def _pwm_state(raw: bytes) -> dict:
-        mhz, ppm, psc, arr, running = struct.unpack("<IIIIB", raw)
+        mhz, ppm, psc, arr, flags = struct.unpack("<IIIIB", raw)
         return {"frequency_hz": mhz / 1000, "duty_ppm": ppm, "psc": psc,
-                "arr": arr, "running": bool(running)}
+                "arr": arr, "running": bool(flags & 1), "update_pending": bool(flags & 2)}
 
     def pwm_start(self, group: int, duration_ms: int, pulses: int = 0) -> dict:
         return self._pwm_state(self.call(PWM, 2, struct.pack("<BII", group, duration_ms, pulses)))
@@ -312,7 +440,9 @@ class USB2XXX:
         self.call(ADC, 1, bytes((resolution, len(channels))) + b"".join(map(bytes, channels)))
 
     def adc_start(self, rate: int, samples: int = 0, pre: int = 0, post: int = 0) -> None:
-        self.call(ADC, 3, struct.pack("<IHHH", rate, samples, pre, post))
+        with self._adc_lock:
+            self.call(ADC, 3, struct.pack("<IHHH", rate, samples, pre, post))
+            self._adc_unsubscribe()
 
     def adc_watchdog(self, channel: int, low: int, high: int) -> None:
         self.call(ADC, 8, struct.pack("<BHH", channel, low, high))
@@ -324,7 +454,16 @@ class USB2XXX:
         return ADCBlock.decode(self.call(ADC, 6, U16.pack(limit)))
 
     def adc_stop(self) -> None:
-        self.call(ADC, 4)
+        with self._adc_lock:
+            try:
+                self.call(ADC, 4)
+            finally:
+                self._adc_unsubscribe()
+
+    def _adc_unsubscribe(self) -> None:
+        if self._adc_stream is not None:
+            self._adc_stream.close()
+            self._adc_stream = None
 
     def adc_read_once(self, channel: int, sample_time: int = 7) -> int:
         with self._adc_lock:
@@ -342,12 +481,18 @@ class USB2XXX:
                 self.adc_stop()
 
     def adc_next_stream(self, timeout: float = 0.8) -> ADCBlock:
-        if self.simulated:
-            block = self.adc_read()
-            if not block.samples:
-                sleep(0.005)
-            return block
         with self._adc_lock:
+            if self.features() & FEATURE_BULK_STREAMS:
+                if self._adc_stream is None:
+                    self._adc_stream = self._bulk_reader().subscribe(
+                        (ADC, 9, 1), lambda tag: self.call(ADC, 9, struct.pack("<IH", tag, 1)))
+                frame = self._adc_stream.read(timeout)
+                return ADCBlock.decode(frame.payload[4:])
+            if self.simulated:
+                block = self.adc_read()
+                if not block.samples:
+                    sleep(0.005)
+                return block
             self.call(ADC, 7, U16.pack(1))
             _sequence, data = receive(self._transport, 0x82, timeout)
             return ADCBlock.decode(data)
@@ -383,6 +528,17 @@ class AsyncDevice:
                 yield block
             if not block.running and not block.more_available:
                 return
+
+    async def receive_uart(self, port: int) -> AsyncIterator[UARTBlock]:
+        subscription = await self.run(USB2XXX.uart_subscribe, port)
+        try:
+            while True:
+                try:
+                    yield await asyncio.to_thread(subscription.read, 0.2)
+                except Deadline:
+                    continue
+        finally:
+            await asyncio.to_thread(subscription.close)
 
 
 def list_devices(*, mock: bool, vid: int = 0, pid: int = 0) -> list[dict]:

@@ -3,7 +3,8 @@
 typedef struct {
     uint8_t rx[UART_RX_SIZE], tx[UART_TX_SIZE];
     uint32_t rx_read, lost, tx_head, tx_tail;
-    uint16_t tx_in_flight;
+    uint32_t stream_tag;
+    uint16_t tx_in_flight, stream_credits;
     bool configured, receiving;
 } uart_state;
 
@@ -16,6 +17,7 @@ static void halt(resources *pool, unsigned port)
     state->configured = state->receiving = false;
     state->tx_head = state->tx_tail = 0;
     state->tx_in_flight = 0;
+    state->stream_tag = state->stream_credits = 0;
     resource_release(pool, (uint8_t)(port + 1));
 }
 
@@ -69,6 +71,39 @@ static uint32_t update_read_position(uart_state *state, uint32_t produced)
     return UART_RX_SIZE;
 }
 
+static uint16_t read_rx(unsigned port, uint8_t *out, uint16_t limit,
+                        uint16_t *written, uint32_t *offset)
+{
+    uart_state *state = &ports[port];
+    const uint32_t available = update_read_position(state, uart_driver_rx_count(port));
+    const uint16_t count = available < limit ? (uint16_t)available : limit;
+    const uint32_t start = state->rx_read;
+    for (unsigned i = 0; i < count; ++i) out[i] = state->rx[(start + i) % UART_RX_SIZE];
+    update_read_position(state, uart_driver_rx_count(port));
+    if (state->rx_read != start) return STATUS_FULL;
+    state->rx_read += count;
+    *offset = start;
+    *written = count;
+    return STATUS_OK;
+}
+
+uint16_t uart_stream_payload(unsigned port, uint8_t *out, uint32_t now)
+{
+    uart_state *state = &ports[port];
+    if (!state->receiving || !state->stream_credits) return 0;
+    uint16_t count;
+    uint32_t offset;
+    if (read_rx(port, out + UART_STREAM_META, DEVICE_FRAGMENT - UART_STREAM_META,
+                &count, &offset) != STATUS_OK || !count) return 0;
+    --state->stream_credits;
+    wire_put32(out, state->stream_tag);
+    wire_put32(out + 4, offset);
+    wire_put32(out + 8, now);
+    wire_put32(out + 12, state->lost);
+    wire_put32(out + 16, uart_driver_errors(port));
+    return UART_STREAM_META + count;
+}
+
 uint16_t uart_command(resources *pool, uint8_t opcode, const uint8_t *input,
                       uint16_t length, uint8_t *out, uint16_t *written)
 {
@@ -91,18 +126,11 @@ uint16_t uart_command(resources *pool, uint8_t opcode, const uint8_t *input,
         return state->receiving ? STATUS_OK : STATUS_IO;
     case 3: {
         if (length != 3 || !state->receiving) return STATUS_VALUE;
-        uint16_t count = wire_u16(input + 1);
+        const uint16_t count = wire_u16(input + 1);
         if (count > DEVICE_FRAGMENT) return STATUS_VALUE;
-        const uint32_t available = update_read_position(state, uart_driver_rx_count(port));
-        if (count > available) count = (uint16_t)available;
-        const uint32_t start = state->rx_read;
-        for (unsigned i = 0; i < count; ++i) out[i] = state->rx[(start + i) % UART_RX_SIZE];
-        update_read_position(state, uart_driver_rx_count(port));
-        if (state->rx_read != start)
-            return STATUS_FULL;
-        state->rx_read += count;
-        *written = count;
-        return STATUS_OK;
+        if (state->stream_tag) return STATUS_BUSY;
+        uint32_t offset;
+        return read_rx(port, out, count, written, &offset);
     }
     case 4: {
         const uint16_t count = (uint16_t)(length - 1);
@@ -120,6 +148,16 @@ uint16_t uart_command(resources *pool, uint8_t opcode, const uint8_t *input,
         wire_put32(out + 4, uart_driver_errors(port));
         wire_put32(out + 8, state->tx_head - state->tx_tail);
         *written = 12;
+        return STATUS_OK;
+    case UART_STREAM_CONFIG:
+        if (length != 5 || !state->receiving) return STATUS_VALUE;
+        state->stream_tag = wire_u32(input + 1);
+        state->stream_credits = 0;
+        return STATUS_OK;
+    case UART_STREAM_CREDIT:
+        if (length != 3 || !state->stream_tag ||
+            wire_u16(input + 1) > 16u - state->stream_credits) return STATUS_VALUE;
+        state->stream_credits += wire_u16(input + 1);
         return STATUS_OK;
     default:
         return STATUS_OPCODE;

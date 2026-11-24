@@ -1,5 +1,7 @@
 """USB2Box v1 wire codec shared by every PC entry point."""
+from dataclasses import dataclass
 import struct
+from time import monotonic
 
 HEADER = struct.Struct("<4sBBBBHBBHHIIIIHH")
 FRAGMENT, MESSAGE = 512, 1024
@@ -65,26 +67,54 @@ def packet(service: int, opcode: int, request: int, data: bytes) -> bytes:
     return b"".join(frames)
 
 
+@dataclass(frozen=True)
+class Frame:
+    kind: int
+    service: int
+    opcode: int
+    status: int
+    request: int
+    stream: int
+    sequence: int
+    payload: bytes
+
+
+class FrameReader:
+    """Keep a validated header across timeouts on the same endpoint."""
+
+    def __init__(self, transport, endpoint: int):
+        self.transport = transport
+        self.endpoint = endpoint
+        self._header: tuple[int, ...] | None = None
+
+    def read(self, timeout: float) -> Frame:
+        end = monotonic() + timeout
+        if self._header is None:
+            header = self.transport.read_exact(self.endpoint, HEADER.size, timeout)
+            (magic, major, minor, size, kind, flags, service, opcode, status, reserved,
+             request, length, total, offset, stream, sequence) = HEADER.unpack(header)
+            if (magic, major, minor, size, reserved, offset) != (b"U2SX", 1, 0, HEADER.size, 0, 0):
+                raise ProtocolError("invalid frame header")
+            if total != length or length > FRAGMENT or flags & ~(FIRST | LAST | ERROR):
+                raise ProtocolError("invalid response length or flags")
+            if flags & (FIRST | LAST) != FIRST | LAST or bool(flags & ERROR) != bool(status):
+                raise ProtocolError("invalid response boundaries")
+            self._header = (kind, service, opcode, status, request, stream, sequence, length)
+        remaining = end - monotonic()
+        payload = self.transport.read_exact(self.endpoint, self._header[-1], max(0, remaining))
+        frame = Frame(*self._header[:-1], payload)
+        self._header = None
+        return frame
+
+
 def receive(transport, endpoint: int, timeout: float,
             expected: tuple[int, int, int] | None = None) -> tuple[int, bytes]:
-    from time import monotonic
-
-    end = monotonic() + timeout
-    header = transport.read_exact(endpoint, HEADER.size, timeout)
-    (magic, major, minor, size, kind, flags, service, opcode, status, reserved,
-     request, length, total, offset, stream, sequence) = HEADER.unpack(header)
-    if (magic, major, minor, size, reserved, offset) != (b"U2SX", 1, 0, HEADER.size, 0, 0):
-        raise ProtocolError("invalid frame header")
-    if total != length or length > FRAGMENT or flags & ~(FIRST | LAST | ERROR):
-        raise ProtocolError("invalid response length or flags")
-    if flags & (FIRST | LAST) != FIRST | LAST or bool(flags & ERROR) != bool(status):
-        raise ProtocolError("invalid response boundaries")
+    frame = FrameReader(transport, endpoint).read(timeout)
     if endpoint == 0x81:
-        if (kind, stream, sequence) != (2, 0, 0) or expected != (service, opcode, request):
+        if ((frame.kind, frame.stream, frame.sequence) != (2, 0, 0) or
+                expected != (frame.service, frame.opcode, frame.request)):
             raise ProtocolError("unexpected response ID or opcode")
-    elif (kind, service, opcode, request, stream, status) != (4, 5, 7, 0, 1, 0):
+    elif (frame.kind, frame.service, frame.opcode, frame.request,
+          frame.stream, frame.status) != (4, 5, 7, 0, 1, 0):
         raise ProtocolError("unexpected stream frame")
-    remaining = end - monotonic()
-    if remaining <= 0:
-        raise Deadline("response deadline")
-    return sequence if endpoint == 0x82 else status, transport.read_exact(endpoint, length, remaining)
+    return (frame.sequence if endpoint == 0x82 else frame.status), frame.payload

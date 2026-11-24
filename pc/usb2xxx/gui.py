@@ -18,12 +18,14 @@ from PySide6.QtWidgets import (
     QMainWindow, QPlainTextEdit, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from . import ADCBlock, I2CMessage, USB2XXX, list_devices
+from . import ADCBlock, Deadline, I2CMessage, UARTSubscription, USB2XXX, list_devices
+from .client import FEATURE_I2C_EVENTS
 from .cli import connection_args, settings
 
 
 class _Results(QObject):
     finished = Signal(object, object, object)
+    data = Signal(object, object, object)
 
 
 class Plot(QWidget):
@@ -85,12 +87,17 @@ class Workbench(QMainWindow):
         self.dev: USB2XXX | None = None
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="usb2box")
         self.emergency = ThreadPoolExecutor(max_workers=1, thread_name_prefix="usb2box-stop")
+        self.stream_workers = ThreadPoolExecutor(max_workers=3, thread_name_prefix="usb2box-data")
         self.connection_guard = Lock()
         self.events = _Results(self)
         self.events.finished.connect(self._finished)
+        self.events.data.connect(self._data_finished)
         self.pending = 0
         self.stop_requested = Event()
         self.capturing = False
+        self.capture_epoch = 0
+        self.following: dict[int, UARTSubscription] = {}
+        self.data_pending: set = set()
         self.last_block: ADCBlock | None = None
 
         self.setWindowTitle("USB2Box Workbench")
@@ -124,6 +131,7 @@ class Workbench(QMainWindow):
         self.timer = QTimer(self)
         self.timer.setInterval(20)
         self.timer.timeout.connect(self._poll_adc)
+        self.timer.timeout.connect(self._poll_uart)
         self.timer.start()
 
     def submit(self, action, callback=None, *, require_device=True) -> None:
@@ -155,8 +163,8 @@ class Workbench(QMainWindow):
     def _finished(self, callback, value, error) -> None:
         self.pending -= 1
         if error:
-            if callback == self._on_adc:
-                self.capturing = False
+            if callback == self._closed:
+                self._closed(None)
             self.log.appendPlainText(error)
         elif callback:
             callback(value)
@@ -197,6 +205,7 @@ class Workbench(QMainWindow):
         return True
 
     def _closed(self, _) -> None:
+        self.following.clear()
         mode = "SIMULATED" if self.options["mock"] else "USB"
         self.state.setText(f"{mode} · Disconnected")
 
@@ -219,6 +228,7 @@ class Workbench(QMainWindow):
         self.emergency.submit(self._close)
         self.emergency.shutdown(wait=True)
         self.executor.shutdown(wait=True, cancel_futures=True)
+        self.stream_workers.shutdown(wait=True, cancel_futures=True)
         event.accept()
 
     def _panel(self, name, fields):
@@ -268,7 +278,7 @@ class Workbench(QMainWindow):
         self._action(page, "Slave", lambda d, v: d.i2c_role(int(v["bus"]), True, int(v["address"], 0)))
         self._action(page, "Transfer", self._i2c_transfer)
         self._action(page, "Set reply", lambda d, v: d.i2c_slave_buffer(int(v["bus"]), bytes.fromhex(v["reply"])))
-        self._action(page, "Read event", lambda d, v: d.i2c_slave_event(int(v["bus"])))
+        self._action(page, "Read event", lambda d, v: self._i2c_event(d, int(v["bus"])))
         self._action(page, "Release", lambda d, v: d.i2c_release(int(v["bus"])))
         page.layout.addWidget(QLabel("Internal pull-ups are weak. Start with short jumpers and low speed."))
         page.layout.addStretch()
@@ -284,6 +294,13 @@ class Workbench(QMainWindow):
                 messages.append(I2CMessage(data=bytes.fromhex(token)))
         return dev.i2c_transfer(int(values["bus"]), int(values["address"], 0), messages).hex(" ")
 
+    @staticmethod
+    def _i2c_event(dev, bus):
+        if not dev.features() & FEATURE_I2C_EVENTS:
+            return dev.i2c_slave_event(bus)
+        event = dev.i2c_next_slave_event(bus)
+        return json.dumps({**asdict(event), "data": event.data.hex(" ")})
+
     def _build_uart(self):
         page = self._panel("UART", [("port", "Port (0 or 1)", "0"), ("baud", "Baud", "115200"),
                                    ("parity", "Parity (0 none, 1 even, 2 odd)", "0"),
@@ -294,14 +311,90 @@ class Workbench(QMainWindow):
         self._action(page, "Send hex", lambda d, v: d.uart_write(int(v["port"]), bytes.fromhex(v["text"])))
         self._action(page, "Read", lambda d, v: self._uart_read(d, int(v["port"])))
         self._action(page, "Statistics", lambda d, v: d.uart_stats(int(v["port"])))
-        self._action(page, "Stop", lambda d, v: d.uart_stop(int(v["port"])))
+        self._action(page, "Stop", lambda d, v: self._stop_uart(d, int(v["port"])),
+                     lambda port: self.following.pop(port, None))
         page.button("Send file", lambda: self._send_file(page.fields["port"].text()))
+        follow = QHBoxLayout()
+        for text, action in (
+            ("Follow RX", lambda: self._follow_uart(page.fields["port"].text())),
+            ("Unfollow", lambda: self._unfollow_uart(page.fields["port"].text())),
+        ):
+            button = QPushButton(text)
+            button.clicked.connect(action)
+            follow.addWidget(button)
+        page.layout.addLayout(follow)
         page.layout.addStretch()
 
     @staticmethod
     def _uart_read(dev, port):
         data = dev.uart_read(port)
         return f"UART{port} {data.hex(' ')} | {data.decode(errors='replace')!r}"
+
+    @staticmethod
+    def _stop_uart(dev, port):
+        dev.uart_stop(port)
+        return port
+
+    def _follow_uart(self, port):
+        self.submit(lambda dev: dev.uart_subscribe(int(port)), self._uart_followed)
+
+    def _uart_followed(self, subscription):
+        if not self.stop_requested.is_set() and self.dev is not None:
+            self.following[subscription.port] = subscription
+
+    def _unfollow_uart(self, port):
+        try:
+            subscription = self.following.get(int(port))
+        except ValueError:
+            self.log.appendPlainText("UART port must be 0 or 1.")
+            return
+        if subscription is not None:
+            self.submit(lambda _: subscription.close(),
+                        lambda _: self.following.pop(subscription.port, None),
+                        require_device=False)
+
+    def _request_data(self, stream, action):
+        if stream in self.data_pending or self.stop_requested.is_set():
+            return
+        self.data_pending.add(stream)
+        task = self.stream_workers.submit(action)
+
+        def done(future):
+            try:
+                value = future.result()
+            except Deadline:
+                self.events.data.emit(stream, None, None)
+            except Exception as error:
+                self.events.data.emit(stream, None, str(error))
+            else:
+                self.events.data.emit(stream, value, None)
+        task.add_done_callback(done)
+
+    def _poll_uart(self):
+        for subscription in self.following.values():
+            self._request_data(subscription, lambda rx=subscription: rx.read(0.05))
+
+    def _data_finished(self, stream, value, error):
+        self.data_pending.discard(stream)
+        if isinstance(stream, UARTSubscription):
+            if self.following.get(stream.port) is not stream:
+                return
+            if error:
+                self.following.pop(stream.port)
+                self.submit(lambda _: stream.close(), require_device=False)
+            elif value:
+                self.log.appendPlainText(f"UART{value.port} RX @{value.device_ms} ms "
+                                         f"lost={value.dropped} errors={value.errors} "
+                                         f"{value.data.hex(' ')} | {value.data.decode(errors='replace')!r}")
+        else:
+            if stream != ("adc", self.capture_epoch) or not self.capturing:
+                return
+            if error:
+                self.capturing = False
+            elif value:
+                self._on_adc(value)
+        if error:
+            self.log.appendPlainText(error)
 
     def _send_file(self, raw_port):
         try:
@@ -343,6 +436,8 @@ class Workbench(QMainWindow):
                                    ("ms", "Maximum duration ms", "500"), ("pulses", "Pulse count", "0")])
         self._action(page, "Configure", lambda d, v: d.pwm_configure(int(v["group"]), int(v["freq"]),
                       int(v["duty"]), bool(int(v["invert"]))))
+        self._action(page, "Update at period", lambda d, v: d.pwm_update(
+            int(v["group"]), int(v["freq"]), int(v["duty"]), bool(int(v["invert"]))))
         self._action(page, "Start bounded output", lambda d, v: d.pwm_start(int(v["group"]), int(v["ms"]), int(v["pulses"])))
         self._action(page, "Actual", lambda d, v: d.pwm_status(int(v["group"])))
         self._action(page, "Stop", lambda d, v: d.pwm_stop(int(v["group"])))
@@ -380,21 +475,30 @@ class Workbench(QMainWindow):
         page.layout.addWidget(self.plot, 1)
 
     def _capture_started(self, _):
+        self.capture_epoch += 1
         self.plot.values.clear()
         self.last_block = None
         self.capturing = True
 
     def _poll_adc(self):
-        if self.capturing and self.pending == 0:
-            def collect(dev):
+        if self.capturing:
+            with self.connection_guard:
+                dev = self.dev
+            if dev is None:
+                return
+
+            def collect():
                 blocks = []
                 for _ in range(8):
-                    block = dev.adc_read()
+                    try:
+                        block = dev.adc_next_stream(0.05)
+                    except Deadline:
+                        break
                     blocks.append(block)
                     if not block.samples or not (block.running or block.more_available):
                         break
                 return blocks
-            self.submit(collect, self._on_adc)
+            self._request_data(("adc", self.capture_epoch), collect)
 
     def _on_adc(self, blocks):
         for block in blocks:

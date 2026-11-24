@@ -4,10 +4,10 @@ typedef struct {
     bool slave;
     uint8_t address, tx[I2C_SLAVE_BYTES];
     uint16_t result;
-    i2c_slave_event event;
 } mock_bus;
 
 static mock_bus mock[2];
+static uint32_t bus_time;
 
 bool i2c_driver_init(unsigned bus, uint32_t speed, bool slave, uint8_t address)
 {
@@ -29,10 +29,9 @@ bool i2c_driver_start(unsigned bus, uint8_t address, bool read, uint8_t *buffer,
     } else {
         if (read) {
             for (unsigned i = 0; i < length; ++i) buffer[i] = peer->tx[i];
+            i2c_record_slave_event(1 - bus, I2C_EVENT_TX, 0, length, ++bus_time);
         } else {
-            for (unsigned i = 0; i < length; ++i) peer->event.bytes[i] = buffer[i];
-            peer->event.count = length;
-            peer->event.received += length;
+            i2c_record_slave_event(1 - bus, I2C_EVENT_RX, buffer, length, ++bus_time);
         }
         mock[bus].result = STATUS_OK;
     }
@@ -43,8 +42,4 @@ void i2c_driver_slave_tx(unsigned bus, const uint8_t *data, uint8_t length)
 {
     for (unsigned i = 0; i < I2C_SLAVE_BYTES; ++i) mock[bus].tx[i] = i < length ? data[i] : 0xff;
 }
-void i2c_driver_slave_event(unsigned bus, i2c_slave_event *out)
-{
-    *out = mock[bus].event;
-    mock[bus].event.count = 0;
-}
+void i2c_driver_service(unsigned bus) { (void)bus; }

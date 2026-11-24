@@ -132,6 +132,43 @@ def create_server(adapter: Adapter) -> FastMCP:
                            warnings=("Weak internal pull-ups may prevent physical communication.",))
 
     @server.tool()
+    def usb2xxx_i2c_slave_configure(bus_id: Port, address: Annotated[int, Field(ge=8, le=119)],
+                                    reply_hex: Annotated[str, Field(max_length=128)] = "",
+                                    confirm: bool = False) -> dict:
+        """Configure a 7-bit slave and up to 64 response bytes."""
+        def configure(dev):
+            reply = bytes.fromhex(reply_hex)
+            dev.i2c_configure(bus_id, 10000)
+            try:
+                dev.i2c_role(bus_id, True, address)
+                dev.i2c_slave_buffer(bus_id, reply)
+            except BaseException:
+                dev.i2c_release(bus_id)
+                raise
+            return {"address": address, "reply_bytes": len(reply)}
+        return adapter.use(configure, mutating=True, confirm=confirm,
+                           warnings=("Weak internal pull-ups may prevent physical communication.",))
+
+    @server.tool()
+    def usb2xxx_i2c_slave_events(bus_id: Port,
+                                limit: Annotated[int, Field(ge=1, le=8)] = 4) -> dict:
+        """Pop bounded slave events in FIFO order and report overflow."""
+        def read(dev):
+            records = []
+            for _ in range(limit):
+                event = dev.i2c_next_slave_event(bus_id)
+                if event.kind is None:
+                    break
+                records.append({**asdict(event), "data": event.data.hex()})
+            return {"events": records, "dropped": event.dropped}
+        return adapter.use(read)
+
+    @server.tool()
+    def usb2xxx_i2c_release(bus_id: Port) -> dict:
+        """Stop an idle I2C bus and release its pins."""
+        return adapter.use(lambda dev: dev.i2c_release(bus_id))
+
+    @server.tool()
     def usb2xxx_uart_configure(
         uart_id: Port, baud: Annotated[int, Field(ge=1200, le=1000000)] = 115200,
         parity: Annotated[int, Field(ge=0, le=2)] = 0,
@@ -170,6 +207,14 @@ def create_server(adapter: Adapter) -> FastMCP:
         """Start a prepared PWM output for at most one second."""
         return adapter.use(lambda dev: dev.pwm_start(group, duration_ms, pulses),
                            mutating=True, confirm=arm and confirm)
+
+    @server.tool()
+    def usb2xxx_pwm_update(group: Port, frequency_hz: Annotated[int, Field(ge=1, le=100000)],
+                           duty_ppm: Annotated[int, Field(ge=0, le=1000000)],
+                           invert: bool = False, confirm: bool = False) -> dict:
+        """Queue a period-boundary update without extending the PWM deadline."""
+        return adapter.use(lambda dev: dev.pwm_update(group, frequency_hz, duty_ppm, invert),
+                           mutating=True, confirm=confirm)
 
     @server.tool()
     def usb2xxx_pwm_stop(group: Port) -> dict:

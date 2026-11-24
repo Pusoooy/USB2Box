@@ -15,6 +15,10 @@ enum {
     SERVICE_SPI = 4, SERVICE_ADC = 5, SERVICE_DIAG = 6,
     SYS_HELLO = 1, SYS_CAPABILITIES, SYS_VERSION, SYS_DEVICE_INFO,
     SYS_OPEN, SYS_HEARTBEAT, SYS_CLOSE, SYS_RESOURCES, SYS_CANCEL, SYS_STOP, SYS_COLLECT,
+    SYS_FEATURES,
+    FEATURE_BULK_STREAMS = 1u << 0,
+    FEATURE_I2C_EVENTS = 1u << 1,
+    FEATURE_PWM_UPDATE = 1u << 2,
 };
 
 typedef uint16_t (*device_command)(uint8_t service, uint8_t opcode,
@@ -36,6 +40,7 @@ typedef struct {
 
 void device_init(device *dev, device_command command, device_stop stop);
 void device_reset(device *dev);
+void device_suspend(device *dev);
 void device_tick(device *dev, uint32_t now);
 size_t device_feed(device *dev, const uint8_t *bytes, size_t length, uint32_t now);
 const uint8_t *device_reply(const device *dev, size_t *length);

@@ -63,6 +63,31 @@ void pwm_driver_start(unsigned group, const pwm_period *period, uint32_t pulses)
 
 bool pwm_driver_running(unsigned group) { return running[group]; }
 
+bool pwm_driver_update(unsigned group, const pwm_period *period)
+{
+    const uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    const bool active = running[group];
+    if (active) {
+        TIM_TypeDef *timer = timers[group];
+        /* Defer update events during the writes. PSC, ARR and CCR1
+         * take effect together at the next natural counter overflow. */
+        SET_BIT(timer->CR1, TIM_CR1_UDIS);
+        timer->PSC = period->prescaler;
+        timer->ARR = period->reload;
+        timer->CCR1 = period->compare;
+        timer->SR = ~TIM_SR_UIF;
+        CLEAR_BIT(timer->CR1, TIM_CR1_UDIS);
+    }
+    __set_PRIMASK(mask);
+    return active;
+}
+
+bool pwm_driver_update_pending(unsigned group)
+{
+    return !(timers[group]->SR & TIM_SR_UIF);
+}
+
 static void compare_irq(unsigned group)
 {
     TIM_TypeDef *timer = timers[group];

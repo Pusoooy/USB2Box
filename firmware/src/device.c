@@ -51,10 +51,15 @@ static void stop_session(device *dev)
 void device_reset(device *dev)
 {
     ++dev->resets;
-    stop_session(dev);
-    reset_rx(dev);
+    device_suspend(dev);
     dev->tx_size = 0;
     dev->tx_sent = 0;
+}
+
+void device_suspend(device *dev)
+{
+    stop_session(dev);
+    reset_rx(dev);
     dev->last_request = 0;
 }
 
@@ -88,6 +93,11 @@ static uint16_t system_command(device *dev, uint16_t length, uint8_t *out,
         out[0] = 1;
         out[1] = 0;
         *written = 2;
+        return STATUS_OK;
+    case SYS_FEATURES:
+        if (length) return STATUS_VALUE;
+        wire_put32(out, FEATURE_BULK_STREAMS | FEATURE_I2C_EVENTS | FEATURE_PWM_UPDATE);
+        *written = 4;
         return STATUS_OK;
     case SYS_DEVICE_INFO:
         if (length) return STATUS_VALUE;

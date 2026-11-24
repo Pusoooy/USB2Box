@@ -3,15 +3,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 import hashlib
 import os
 import subprocess
 import tempfile
-from threading import Thread
+from threading import Event, Thread
 from time import monotonic
 
-from .protocol import Busy, Deadline, Disconnected
+from .protocol import Busy, Deadline, Disconnected, FRAGMENT, HEADER, ProtocolError
 
 
 class Transport(ABC):
@@ -32,19 +32,50 @@ class MockTransport(Transport):
 
     def __init__(self, executable: str | Path | None = None):
         path = Path(executable or os.getenv("USB2XXX_MOCK_DEVICE", "build/host/mock-device"))
-        self._process = subprocess.Popen([str(path.resolve())], stdin=subprocess.PIPE,
+        self._process = subprocess.Popen([str(path.resolve()), "--bulk"], stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, bufsize=0)
-        self._queue: Queue[bytes] = Queue(32)
-        self._buffer = bytearray()
+        self._queues: dict[int, Queue[bytes]] = {0x81: Queue(32), 0x82: Queue(32)}
+        self._buffers = {0x81: bytearray(), 0x82: bytearray()}
+        self._ended = Event()
+        self._reader_error: Exception | None = None
         self._reader = Thread(target=self._receive, daemon=True)
         self._reader.start()
 
-    def _receive(self) -> None:
-        while True:
-            block = self._process.stdout.read(1024)
-            self._queue.put(block)
+    def _pipe_exact(self, count: int) -> bytes:
+        data = bytearray()
+        while len(data) < count:
+            block = self._process.stdout.read(count - len(data))
             if not block:
                 break
+            data.extend(block)
+        return bytes(data)
+
+    def _receive(self) -> None:
+        try:
+            prefix = self._pipe_exact(3)
+            if prefix == b"U2S":
+                # Older simulator executables keep raw frames on stdout.
+                self._queues[0x81].put_nowait(prefix)
+                while block := self._process.stdout.read(1024):
+                    self._queues[0x81].put_nowait(block)
+                return
+            while prefix:
+                if len(prefix) != 3 or prefix[0] not in self._queues:
+                    raise ProtocolError("invalid simulator endpoint record")
+                length = int.from_bytes(prefix[1:], "little")
+                if not HEADER.size <= length <= HEADER.size + FRAGMENT:
+                    raise ProtocolError("invalid simulator record length")
+                block = self._pipe_exact(length)
+                if len(block) != length:
+                    raise Disconnected("simulator stopped during a frame")
+                self._queues[prefix[0]].put_nowait(block)
+                prefix = self._pipe_exact(3)
+        except Full:
+            self._reader_error = ProtocolError("simulator endpoint queue overflow")
+        except (Disconnected, ProtocolError, OSError) as error:
+            self._reader_error = error
+        finally:
+            self._ended.set()
 
     def write(self, data: bytes, timeout: float) -> None:
         try:
@@ -58,19 +89,23 @@ class MockTransport(Transport):
             raise Disconnected("mock device closed") from error
 
     def read_exact(self, endpoint: int, size: int, timeout: float) -> bytes:
-        if endpoint != 0x81:
-            raise ValueError("MockTransport uses control reads")
+        buffer = self._buffers[endpoint]
+        queue = self._queues[endpoint]
         end = monotonic() + timeout
-        while len(self._buffer) < size:
-            try:
-                data = self._queue.get(timeout=max(0.0, end - monotonic()))
-            except Empty as error:
-                raise Deadline("mock response deadline") from error
-            if not data:
+        while len(buffer) < size:
+            if self._ended.is_set() and queue.empty():
+                if self._reader_error:
+                    raise Disconnected("mock device link failed") from self._reader_error
                 raise Disconnected("mock device exited")
-            self._buffer.extend(data)
-        result = bytes(self._buffer[:size])
-        del self._buffer[:size]
+            try:
+                data = queue.get(timeout=max(0.0, min(0.05, end - monotonic())))
+            except Empty as error:
+                if monotonic() >= end:
+                    raise Deadline("mock response deadline") from error
+                continue
+            buffer.extend(data)
+        result = bytes(buffer[:size])
+        del buffer[:size]
         return result
 
     def close(self) -> None:

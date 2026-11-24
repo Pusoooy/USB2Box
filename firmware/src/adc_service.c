@@ -2,7 +2,7 @@
 
 static adc_config config;
 static uint16_t cache[ADC_CACHE];
-static uint32_t produced, consumed, target, dropped, rate;
+static uint32_t produced, consumed, target, dropped, rate, stream_tag;
 static uint16_t pre_trigger, post_trigger, credits;
 static bool configured, running, awaiting_trigger, stream_finished, threshold_seen;
 
@@ -17,6 +17,7 @@ void adc_stop_all(resources *pool)
     stop();
     configured = false;
     credits = 0;
+    stream_tag = 0;
     produced = consumed = 0;
     resource_release(pool, 8);
 }
@@ -112,6 +113,7 @@ static uint16_t start(uint32_t hz, uint16_t samples, uint16_t pre, uint16_t post
     post_trigger = post;
     awaiting_trigger = post != 0;
     credits = 0;
+    stream_tag = 0;
     stream_finished = threshold_seen = false;
     rate = adc_driver_start(&config, hz, post ? 0 : samples);
     running = rate != 0;
@@ -135,14 +137,17 @@ static uint16_t read_samples(uint8_t *out, uint16_t limit)
     return (uint16_t)(16 + 2 * limit);
 }
 
-uint16_t adc_stream_payload(uint8_t *out)
+uint16_t adc_stream_payload(uint8_t *out, uint8_t *opcode)
 {
     if (!credits || awaiting_trigger || stream_finished ||
         (produced == consumed && running)) return 0;
     --credits;
-    const uint16_t length = read_samples(out, (DEVICE_FRAGMENT - 16) / 2);
+    const uint16_t prefix = stream_tag ? 4 : 0;
+    if (stream_tag) wire_put32(out, stream_tag);
+    *opcode = stream_tag ? ADC_TAGGED_CREDIT : ADC_STREAM_CREDIT;
+    const uint16_t length = read_samples(out + prefix, (DEVICE_FRAGMENT - prefix - 16) / 2);
     if (!running && produced == consumed) stream_finished = true;
-    return length;
+    return prefix + length;
 }
 
 uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
@@ -171,8 +176,8 @@ uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
         *written = read_samples(out, count);
         return STATUS_OK;
     }
-    case 7:
-        if (length != 2 || !configured || wire_u16(input) > 16u - credits)
+    case ADC_STREAM_CREDIT:
+        if (length != 2 || !configured || stream_tag || wire_u16(input) > 16u - credits)
             return STATUS_VALUE;
         credits += wire_u16(input);
         return STATUS_OK;
@@ -189,6 +194,16 @@ uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
             return STATUS_OK;
         }
         return STATUS_VALUE;
+    }
+    case ADC_TAGGED_CREDIT: {
+        if (length != 6 || !configured || !wire_u32(input)) return STATUS_VALUE;
+        const uint32_t tag = wire_u32(input);
+        const uint16_t count = wire_u16(input + 4);
+        const uint16_t pending = tag == stream_tag ? credits : 0;
+        if (count > 16u - pending) return STATUS_VALUE;
+        stream_tag = tag;
+        credits = pending + count;
+        return STATUS_OK;
     }
     default:
         return STATUS_OPCODE;
