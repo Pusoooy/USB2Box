@@ -15,7 +15,7 @@ int main(void)
     assert(pwm_calculate(84000000, 16, 1234, 0, &period) && period.compare == 0);
     assert(!pwm_calculate(84000000, 16, 1000, 1000001, &period));
 
-    uint8_t out[DEVICE_FRAGMENT], req[10] = {0};
+    uint8_t out[DEVICE_FRAGMENT], req[11] = {0};
     uint16_t written;
     pwm_mock_tick(UINT32_MAX - 10);
     for (unsigned i = 0; i < 2; ++i) {
@@ -50,12 +50,69 @@ int main(void)
     wire_put32(req + 5, 0);
     assert(pwm_command(&pool, 3, req, 10, out, &written, 2) == STATUS_VALUE);
     pwm_mock_tick(UINT32_MAX - 3);
-    assert(!pwm_driver_running(0)); /* One old cycle and nine updated cycles. */
+    assert(!pwm_driver_running(0, 0)); /* One old cycle and nine updated cycles. */
     assert(pwm_command(&pool, 2, (uint8_t[]){0, 20, 0, 0, 0, 0, 0, 0, 0},
                       9, out, &written, UINT32_MAX - 10) == STATUS_OK);
     pwm_poll(9);
-    assert(!pwm_driver_running(0) && pwm_driver_running(1));
+    assert(!pwm_driver_running(0, 0) && pwm_driver_running(1, 0));
     pwm_stop_all(&pool);
-    assert(!pwm_driver_running(1) && pool.owner[RESOURCE_TIMER(3)] == 0);
-    puts("PWM independent frequency plans and deadline safe stop passed");
+    assert(!pwm_driver_running(1, 0) && pool.owner[RESOURCE_TIMER(3)] == 0);
+
+    const uint8_t first[] = {0};
+    const uint8_t second[] = {0, 2};
+    req[0] = 0;
+    wire_put32(req + 1, 1000);
+    wire_put32(req + 5, 250000);
+    assert(pwm_command(&pool, 1, req, 10, out, &written, 10) == STATUS_OK);
+    req[1] = 2;
+    wire_put32(req + 2, 1200);
+    wire_put32(req + 6, 700000);
+    req[10] = 1;
+    assert(pwm_command(&pool, 9, req, 11, out, &written, 10) == STATUS_BUSY);
+    assert(pool.owner[RESOURCE_PIN('A', 1)] == 0);
+
+    resource_plan adc = {0};
+    uint8_t conflict;
+    resource_add(&adc, RESOURCE_PIN('A', 1));
+    assert(resource_reserve(&pool, &adc, 8, &conflict) == STATUS_OK);
+    wire_put32(req + 2, 1000);
+    assert(pwm_command(&pool, 9, req, 11, out, &written, 10) == STATUS_BUSY);
+    assert(pool.owner[RESOURCE_PIN('A', 0)] == 5);
+    resource_release(&pool, 8);
+    assert(pwm_command(&pool, 9, req, 11, out, &written, 10) == STATUS_OK);
+    assert(wire_u32(out) == 1000000 && wire_u32(out + 4) == 700000);
+
+    pwm_mock_tick(10);
+    assert(pwm_command(&pool, 2, (uint8_t[]){0, 40, 0, 0, 0, 0, 0, 0, 0},
+                       9, out, &written, 10) == STATUS_OK);
+    assert(pwm_command(&pool, 10, (uint8_t[]){0, 2, 20, 0, 0, 0, 2, 0, 0, 0},
+                       10, out, &written, 10) == STATUS_OK);
+    wire_put32(req + 2, 2000);
+    wire_put32(req + 6, 600000);
+    assert(pwm_command(&pool, 11, req, 11, out, &written, 10) == STATUS_OK);
+    assert(pwm_command(&pool, 5, first, 1, out, &written, 10) == STATUS_OK);
+    assert(wire_u32(out) == 1000000 && wire_u32(out + 4) == 250000 && out[16] == 3);
+    pwm_mock_tick(11);
+    assert(pwm_command(&pool, 5, first, 1, out, &written, 11) == STATUS_OK);
+    assert(wire_u32(out) == 2000000 && wire_u32(out + 4) == 250000 && out[16] == 1);
+    assert(pwm_command(&pool, 13, second, 2, out, &written, 11) == STATUS_OK);
+    assert(wire_u32(out) == 2000000 && wire_u32(out + 4) == 600000 && out[16] == 1);
+    pwm_mock_tick(12);
+    assert(!pwm_driver_running(0, 1) && pwm_driver_running(0, 0));
+    assert(pwm_command(&pool, 12, second, 2, out, &written, 12) == STATUS_OK);
+    assert(pool.owner[RESOURCE_TIMER(5)] == 5 && pool.owner[RESOURCE_PIN('A', 1)] == 0);
+    assert(pwm_command(&pool, 4, first, 1, out, &written, 12) == STATUS_OK);
+    assert(pool.owner[RESOURCE_TIMER(5)] == 0 && pool.owner[RESOURCE_PIN('A', 0)] == 0);
+    wire_put32(req + 2, 1000);
+    assert(pwm_command(&pool, 9, req, 11, out, &written, 12) == STATUS_OK);
+    assert(pwm_command(&pool, 10, (uint8_t[]){0, 2, 20, 0, 0, 0, 0, 0, 0, 0},
+                       10, out, &written, 12) == STATUS_OK);
+    wire_put32(req + 2, 1500);
+    assert(pwm_command(&pool, 11, req, 11, out, &written, 12) == STATUS_OK);
+    pwm_mock_tick(13);
+    assert(pwm_command(&pool, 13, second, 2, out, &written, 13) == STATUS_OK);
+    assert(wire_u32(out) == 1500000 && out[16] == 1);
+    pwm_stop_all(&pool);
+    assert(!pwm_driver_running(0, 1) && pool.owner[RESOURCE_TIMER(5)] == 0);
+    puts("PWM shared timer, independent channels, updates and deadline safe stop passed");
 }

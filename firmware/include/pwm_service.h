@@ -3,8 +3,11 @@
 
 #include "resources.h"
 
+enum { PWM_GROUPS = 2, PWM_CHANNELS = 2 };
+
 typedef struct {
     uint32_t prescaler, reload, compare, frequency_millihz, duty_ppm;
+    uint32_t requested_duty;
     bool invert;
 } pwm_period;
 
@@ -16,10 +19,10 @@ void pwm_poll(uint32_t now);
 void pwm_stop_all(resources *pool);
 
 uint32_t pwm_driver_clock(void);
-void pwm_driver_start(unsigned group, const pwm_period *period, uint32_t pulses);
-void pwm_driver_stop(unsigned group);
-bool pwm_driver_running(unsigned group);
-bool pwm_driver_update(unsigned group, const pwm_period *period);
+void pwm_driver_start(unsigned group, unsigned channel, const pwm_period *period, uint32_t pulses);
+void pwm_driver_stop(unsigned group, unsigned channel);
+bool pwm_driver_running(unsigned group, unsigned channel);
+bool pwm_driver_update(unsigned group, const pwm_period periods[PWM_CHANNELS]);
 bool pwm_driver_update_pending(unsigned group);
 
 bool pwm_capture_start(uint32_t counter_hz);

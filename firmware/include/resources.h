@@ -27,5 +27,6 @@ bool resource_dma_add(resource_plan *plan, const resources *pool, uint8_t owner,
 uint16_t resource_reserve(resources *pool, const resource_plan *plan,
                           uint8_t owner, uint8_t *conflict);
 void resource_release(resources *pool, uint8_t owner);
+void resource_release_item(resources *pool, uint8_t owner, uint8_t id);
 
 #endif

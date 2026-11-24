@@ -26,6 +26,7 @@ FEATURE_PWM_UPDATE = 1 << 2
 FEATURE_ADC_TIMING = 1 << 3
 FEATURE_I2C_RECOVERY = 1 << 4
 FEATURE_DIAGNOSTIC_LOG = 1 << 5
+FEATURE_PWM_CHANNELS = 1 << 6
 
 
 @dataclass(frozen=True)
@@ -433,27 +434,37 @@ class USB2XXX:
             raise ProtocolError("invalid I²C recovery result")
         return {"pulses": raw[0], "scl_high": bool(raw[1] & 1), "sda_high": bool(raw[1] & 2)}
 
+    def _pwm_call(self, op: int, group: int, channel: int, payload: bytes = b"") -> bytes:
+        if group not in (0, 1) or channel not in (1, 2):
+            raise ValueError("PWM group must be 0 or 1, and channel must be 1 or 2")
+        if channel == 1:
+            return self.call(PWM, op, bytes((group,)) + payload)
+        return self.call(PWM, op + 8, bytes((group, channel)) + payload)
+
     def pwm_configure(self, group: int, frequency_hz: int, duty_ppm: int,
-                      invert: bool = False) -> dict:
-        raw = self.call(PWM, 1, struct.pack("<BIIB", group, frequency_hz, duty_ppm, invert))
-        return self._pwm_state(raw)
+                      invert: bool = False, *, channel: int = 1) -> dict:
+        raw = self._pwm_call(1, group, channel, struct.pack("<IIB", frequency_hz, duty_ppm, invert))
+        return self._pwm_state(raw, group, channel)
 
     def pwm_update(self, group: int, frequency_hz: int, duty_ppm: int,
-                   invert: bool = False) -> dict:
-        raw = self.call(PWM, 3, struct.pack("<BIIB", group, frequency_hz, duty_ppm, invert))
-        return self._pwm_state(raw)
+                   invert: bool = False, *, channel: int = 1) -> dict:
+        raw = self._pwm_call(3, group, channel, struct.pack("<IIB", frequency_hz, duty_ppm, invert))
+        return self._pwm_state(raw, group, channel)
 
     @staticmethod
-    def _pwm_state(raw: bytes) -> dict:
+    def _pwm_state(raw: bytes, group: int, channel: int) -> dict:
         mhz, ppm, psc, arr, flags = struct.unpack("<IIIIB", raw)
         return {"frequency_hz": mhz / 1000, "duty_ppm": ppm, "psc": psc,
-                "arr": arr, "running": bool(flags & 1), "update_pending": bool(flags & 2)}
+                "arr": arr, "timer": ("TIM5", "TIM3")[group], "channel": channel,
+                "duty_step_ppm": 1_000_000 / (arr + 1), "running": bool(flags & 1),
+                "update_pending": bool(flags & 2)}
 
-    def pwm_start(self, group: int, duration_ms: int, pulses: int = 0) -> dict:
-        return self._pwm_state(self.call(PWM, 2, struct.pack("<BII", group, duration_ms, pulses)))
+    def pwm_start(self, group: int, duration_ms: int, pulses: int = 0, *, channel: int = 1) -> dict:
+        raw = self._pwm_call(2, group, channel, struct.pack("<II", duration_ms, pulses))
+        return self._pwm_state(raw, group, channel)
 
-    def pwm_status(self, group: int) -> dict:
-        return self._pwm_state(self.call(PWM, 5, bytes((group,))))
+    def pwm_status(self, group: int, *, channel: int = 1) -> dict:
+        return self._pwm_state(self._pwm_call(5, group, channel), group, channel)
 
     def pwm_capture_start(self, frequency: int = 1000000) -> None:
         self.call(PWM, 6, U32.pack(frequency))
@@ -466,8 +477,8 @@ class USB2XXX:
     def pwm_capture_stop(self) -> None:
         self.call(PWM, 8)
 
-    def pwm_stop(self, group: int) -> None:
-        self.call(PWM, 4, bytes((group,)))
+    def pwm_stop(self, group: int, *, channel: int = 1) -> None:
+        self._pwm_call(4, group, channel)
 
     def spi_transfer(self, segments: list[bytes], *, mode: int = 0, bits: int = 8,
                      cs: int = 0, hz: int = 1000000, lsb: bool = False,

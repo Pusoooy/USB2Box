@@ -134,7 +134,7 @@ static uint16_t system_command(device *dev, uint16_t length, uint8_t *out,
         if (length) return STATUS_VALUE;
         wire_put32(out, FEATURE_BULK_STREAMS | FEATURE_I2C_EVENTS |
                         FEATURE_PWM_UPDATE | FEATURE_ADC_TIMING | FEATURE_I2C_RECOVERY |
-                        FEATURE_DIAGNOSTIC_LOG);
+                        FEATURE_DIAGNOSTIC_LOG | FEATURE_PWM_CHANNELS);
         *written = 4;
         return STATUS_OK;
     case SYS_DEVICE_INFO:

@@ -9,7 +9,7 @@ from pathlib import Path
 import random
 from time import monotonic, sleep
 
-from usb2xxx import Busy, I2CMessage, USB2XXX, list_devices
+from usb2xxx import Busy, Deadline, I2CMessage, USB2XXX, list_devices
 
 
 def wait_until(action, done, seconds=1.0):
@@ -79,12 +79,12 @@ def i2c_loop(dev):
     return {"speed_hz": 10000, "directions": 2}
 
 
-def pwm_loop(dev, group):
+def pwm_loop(dev, group, channel):
     expected = 1000 + 300 * group
-    dev.pwm_configure(group, expected, 250000)
+    dev.pwm_configure(group, expected, 250000, channel=channel)
     dev.pwm_capture_start()
     try:
-        dev.pwm_start(group, 250)
+        dev.pwm_start(group, 750, channel=channel)
 
         def measure():
             try:
@@ -92,12 +92,19 @@ def pwm_loop(dev, group):
             except Busy:
                 return None
 
-        actual = wait_until(measure, bool, 0.2)
-        if abs(actual["frequency_hz"] - expected) > expected * 0.02:
-            raise ValueError(f"PWM fixture frequency mismatch: {actual}")
-        return actual
+        first = wait_until(measure, bool, 0.2)
+        if (abs(first["frequency_hz"] - expected) > expected * 0.02 or
+                abs(first["duty_ppm"] - 250000) > 20000):
+            raise ValueError(f"PWM fixture frequency or duty mismatch: {first}")
+
+        frequency = expected + 400
+        dev.pwm_update(group, frequency, 600000, channel=channel)
+        updated = wait_until(measure, lambda reading: reading and
+                             abs(reading["frequency_hz"] - frequency) <= frequency * 0.02 and
+                             abs(reading["duty_ppm"] - 600000) <= 20000, 0.3)
+        return {"group": group, "channel": channel, "initial": first, "updated": updated}
     finally:
-        dev.pwm_stop(group)
+        dev.pwm_stop(group, channel=channel)
         dev.pwm_capture_stop()
 
 
@@ -107,12 +114,56 @@ def adc_sample(dev, channel):
             "samples": len(values)}
 
 
+def adc_stream(dev, channel, seconds):
+    target = 100000
+    dev.adc_configure([(channel, 2)], resolution=0)
+    samples = blocks = expected_offset = discontinuities = dropped = timeouts = 0
+    rate = resolution = None
+    command_ms = []
+    stopped_early = False
+    try:
+        dev.adc_start(target)
+        start = monotonic()
+        next_probe = start + 0.25
+        while monotonic() - start < seconds:
+            try:
+                block = dev.adc_next_stream(timeout=0.3)
+            except Deadline:
+                timeouts += 1
+                continue
+            dropped = block.dropped
+            if block.samples:
+                discontinuities += block.offset != expected_offset
+                expected_offset = block.offset + len(block.samples)
+                samples += len(block.samples)
+                blocks += 1
+                rate, resolution = block.rate, block.resolution
+            if not block.running and not block.more_available:
+                stopped_early = True
+                break
+            now = monotonic()
+            if now >= next_probe:
+                dev.resources()
+                command_ms.append((monotonic() - now) * 1000)
+                next_probe = now + 0.25
+        elapsed = monotonic() - start
+    finally:
+        dev.adc_stop()
+    return {"channel": channel, "target_sps": target, "reported_sps": rate,
+            "resolution_bits": resolution, "duration_s": elapsed, "samples": samples,
+            "blocks": blocks, "host_received_sps": samples / elapsed,
+            "host_sample_payload_bytes_per_s": 2 * samples / elapsed,
+            "discontinuous_blocks": discontinuities, "device_dropped_samples": dropped,
+            "read_timeouts": timeouts, "stopped_early": stopped_early,
+            "control_probes": len(command_ms), "max_control_round_trip_ms": max(command_ms, default=None)}
+
+
 def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--vid", type=lambda item: int(item, 0))
     parser.add_argument("--pid", type=lambda item: int(item, 0))
     parser.add_argument("--serial")
-    parser.add_argument("--fixture", choices=("usb", "uart", "i2c", "pwm", "spi", "adc"),
+    parser.add_argument("--fixture", choices=("usb", "uart", "i2c", "pwm", "spi", "adc", "adc-stream"),
                         default="usb")
     parser.add_argument("--board-rev")
     parser.add_argument("--wiring")
@@ -120,12 +171,16 @@ def main():
     parser.add_argument("--log", type=Path)
     parser.add_argument("--channel", default=10, type=int)
     parser.add_argument("--group", choices=(0, 1), default=0, type=int)
+    parser.add_argument("--pwm-channel", choices=(1, 2), default=1, type=int)
+    parser.add_argument("--seconds", default=10, type=int, help="ADC stream measurement window, 1–60 seconds")
     args = parser.parse_args()
     if not args.vid or not args.pid:
         print("NOT_RUN: assigned USB2Box VID/PID and a physical board are required.")
         return 2
     if args.fixture != "usb" and (not args.board_rev or not args.wiring or not args.firmware or not args.log):
         parser.error("physical fixture checks require board revision, wiring, firmware image and log path")
+    if args.fixture == "adc-stream" and not 1 <= args.seconds <= 60:
+        parser.error("ADC stream measurement window must be 1–60 seconds")
     report = {"fixture": args.fixture, "board_revision": args.board_rev, "wiring": args.wiring,
               "timestamp_utc": datetime.now(timezone.utc).isoformat(), "simulated": False,
               "firmware_image_sha256": sha256(args.firmware.read_bytes()).hexdigest() if args.firmware else None,
@@ -139,10 +194,18 @@ def main():
             report["metrics"] = {
                 "usb": lambda: dev.capabilities(), "uart": lambda: uart_loop(dev),
                 "spi": lambda: spi_loop(dev), "i2c": lambda: i2c_loop(dev),
-                "pwm": lambda: pwm_loop(dev, args.group),
+                "pwm": lambda: pwm_loop(dev, args.group, args.pwm_channel),
                 "adc": lambda: adc_sample(dev, args.channel),
+                "adc-stream": lambda: adc_stream(dev, args.channel, args.seconds),
             }[args.fixture]()
-        report["verdict"] = "MEASURED" if args.fixture == "adc" else "PASS"
+        if args.fixture == "adc-stream":
+            metrics = report["metrics"]
+            if (not metrics["samples"] or metrics["discontinuous_blocks"] or
+                    metrics["device_dropped_samples"] or metrics["read_timeouts"] or metrics["stopped_early"]):
+                report["detail"] = "ADC stream ended early or was incomplete"
+                report["verdict"] = "FAILED"
+                return 1
+        report["verdict"] = "MEASURED" if args.fixture in ("adc", "adc-stream") else "PASS"
         return 0
     except Exception as error:
         report["detail"] = str(error)

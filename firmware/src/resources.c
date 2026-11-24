@@ -67,3 +67,9 @@ void resource_release(resources *pool, uint8_t owner)
     for (unsigned i = 0; i < RESOURCE_COUNT; ++i)
         if (pool->owner[i] == owner) pool->owner[i] = 0;
 }
+
+void resource_release_item(resources *pool, uint8_t owner, uint8_t id)
+{
+    if (owner && owner != RESOURCE_SYSTEM_OWNER && id < RESOURCE_COUNT && pool->owner[id] == owner)
+        pool->owner[id] = 0;
+}

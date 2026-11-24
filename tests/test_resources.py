@@ -1,9 +1,11 @@
 import csv
 import itertools
+import re
 import unittest
 from pathlib import Path
 
-SCHEMAS = Path(__file__).resolve().parents[1] / "schemas"
+ROOT = Path(__file__).resolve().parents[1]
+SCHEMAS = ROOT / "schemas"
 
 
 def table(name):
@@ -12,6 +14,14 @@ def table(name):
 
 
 class ResourceTests(unittest.TestCase):
+    def test_requirement_trace_matches_confirmed_decisions(self):
+        decisions = (ROOT / "docs" / "decisions.md").read_text(encoding="utf-8")
+        expected = dict(re.findall(r"^\| ([A-Z]\d{2}) \| ([A-D]) \|", decisions, re.MULTILINE))
+        expected.update({"GUI-01": "", "MCP-01": ""})
+        trace = table("requirements_trace.csv")
+        self.assertEqual(len(trace), len(expected))
+        self.assertEqual({row["requirement_id"]: row["choice"] for row in trace}, expected)
+
     def test_package_and_gpio_conflicts(self):
         pins = table("pinmap_candidate.csv")
         groups = {}
@@ -25,6 +35,8 @@ class ResourceTests(unittest.TestCase):
         for left, right in itertools.combinations(primary, 2):
             self.assertFalse(groups[left] & groups[right], (left, right))
         self.assertEqual(groups["PWM2"] & groups["USART6"], {"PC6"})
+        self.assertEqual(groups["PWM1_CH2"] & groups["ADC1"], {"PA1"})
+        self.assertEqual(groups["PWM2_CH2"] & groups["USART6"], {"PC7"})
         self.assertEqual(groups["ADC1"] & set.union(*(groups[key] for key in primary)),
                          {"PA0", "PA2", "PA3", "PA5", "PA6", "PA7"})
 

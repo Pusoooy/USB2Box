@@ -9,6 +9,7 @@ import time
 import unittest
 
 from usb2xxx import Busy, Deadline, I2CMessage, LeaseExpired, RemoteError, USB2XXX
+from usb2xxx.client import FEATURE_PWM_CHANNELS
 from usb2xxx.protocol import HEADER, FrameReader
 from usb2xxx.transport import acquire_device_lock
 
@@ -47,6 +48,17 @@ class SDKTests(unittest.TestCase):
             for group in range(2):
                 dev.pwm_configure(group, 1000 + group * 325, 250000)
                 self.assertTrue(dev.pwm_start(group, 1000)["running"])
+            self.assertTrue(dev.features() & FEATURE_PWM_CHANNELS)
+            state = dev.pwm_configure(0, 1000, 750000, channel=2)
+            self.assertEqual((state["timer"], state["channel"], state["duty_ppm"]),
+                             ("TIM5", 2, 750000))
+            self.assertAlmostEqual(state["duty_step_ppm"], 1_000_000 / 84000)
+            self.assertTrue(dev.pwm_start(0, 1000, channel=2)["running"])
+            with self.assertRaises(Busy) as conflict:
+                dev.adc_configure([(1, 7)])
+            self.assertEqual(conflict.exception.detail["resource"], 1)
+            dev.pwm_stop(0, channel=2)
+            self.assertTrue(dev.pwm_status(0)["running"])
             with self.assertRaises(Busy) as conflict:
                 dev.adc_configure([(0, 7)])
             self.assertEqual(conflict.exception.detail["resource"], 0)

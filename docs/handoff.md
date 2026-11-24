@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段：M12 软件回归通过，Windows 实机和 HIL 待验证。**
+**当前阶段为 M12。0.1.1 候选已通过云端软件回归，Windows 实机和 HIL 待验证。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -20,6 +20,8 @@ STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系
 - [HIL 指引](hil-fixtures.md) 给出 ST-Link 下载、USB 识别和五个夹具。首次硬件工作核验 PCB/晶振/VBUS 走线及合法 VID/PID，再执行 H00 到 H09。实物缺失时硬件记录仍为 `NOT_RUN`。
 - Windows x64 wheelhouse、MinGW 模拟器、可替换 libusb 和 SHA256 清单经 Linux 构建验证。Windows 运行时需已有 CPython 3.12，待实际 Windows 10/11 测试与公开再分发审查。[离线工作台说明](windows-offline.md)
 - 第二轮集成实现了双 UART 数据推送、ADC/UART 复用、有界 I²C 从机 FIFO 和 PWM 运行中频率/占空比更新。新增功能可由 SYS 12 查询，原有帧布局兼容。ADC 扫描时间使用设备侧估算，I²C 支持显式总线恢复，SPI 保留 DMA 部分数据。Linux 已验证跨进程锁的占用和释放。实板时序、Windows 真机与吞吐数据仍待采集。[测试报告](test-report.md)
+- 0.1.1 基于 `4f13a34` 增加了 TIM5/PA1、TIM3/PC7 的 CH2 候选和组内共享频率管理。通过 Host 模拟重置、挂起、租约到期时关闭四个输出并释放资源。新增的 `adc-stream` 夹具记录实收速率、丢样和控制延迟。PWM 夹具测量更新前后的频率与占空比，两种夹具均已用 Mock 运行。[硬件候选与兼容性](adr/0005-pwm-channels-and-package.md)
+- 最新回归与离线验证见 [原始日志](evidence/m12-channels-verify.log)。在 Python 3.12 下运行 `make -j2 verify-all`。重建候选使用 `make package-windows`，版本来自 `pyproject.toml`。实板到位后先核验 HSE、USB 走线和 PA1/PC7 是否引出，再用合法 VID/PID 执行 H00–H09。I²C 1 MHz、扩展硬件接口和 PWM/ADC 硬同步仍是条件目标。
 
 ## 历史交接
 

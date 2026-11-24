@@ -176,7 +176,7 @@ test-adc: build/host/test-adc
 test-host: test-adc
 
 MOCK_SOURCES := $(sort $(HOST_UART_SOURCES) $(HOST_I2C_SOURCES) $(HOST_PWM_SOURCES) $(HOST_SPI_SOURCES) $(HOST_ADC_SOURCES) firmware/src/app.c firmware/src/stream.c)
-build/host/test-stream: tests/test_stream.c $(sort $(HOST_UART_SOURCES) $(HOST_ADC_SOURCES)) firmware/src/stream.c $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
+build/host/test-stream: tests/test_stream.c $(MOCK_SOURCES) $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
 	mkdir -p $(@D)
 	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
 
@@ -229,4 +229,5 @@ WIN_STAGE_ARGS ?=
 package-windows:
 	$(MAKE) mock-device MOCK_EXE=dist/windows-x64/mock-device.exe HOST_CC=$(WIN_CC) HOST_LDFLAGS=-static
 	$(PYTHON) -m pip wheel --no-build-isolation --no-deps . -w dist
-	$(PYTHON) tools/stage_windows_release.py --output "$(WIN_PACKAGE)" --mock dist/windows-x64/mock-device.exe --sdk-wheel dist/usb2xxx-0.1.0-py3-none-any.whl --seven-zip "$(SEVEN_ZIP)" $(WIN_STAGE_ARGS)
+	sdk_version="$$( $(PYTHON) -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])' )" && \
+		$(PYTHON) tools/stage_windows_release.py --output "$(WIN_PACKAGE)" --mock dist/windows-x64/mock-device.exe --sdk-wheel "dist/usb2xxx-$$sdk_version-py3-none-any.whl" --seven-zip "$(SEVEN_ZIP)" $(WIN_STAGE_ARGS)

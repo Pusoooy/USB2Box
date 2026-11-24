@@ -24,6 +24,8 @@
 | UART #2 | USART2 | PA2 TX, PA3 RX | AF7 | 与ADC2/3, TIM2/5候选通道冲突 | PCB待确认 |
 | PWM #1 | TIM5 CH1 | PA0 | AF2 | 32位TIM5独立频率组；占用ADC0 | PCB待确认 |
 | PWM #2 | TIM3 CH1 | PC6 | AF2 | 与USART6 TX、SDIO等复用冲突 | PCB待确认 |
+| PWM #1 扩展 | TIM5 CH2 | PA1 | AF2 | 与 TIM5 CH1 共享频率，占用 ADC1_IN1 | 芯片 AF 已核对，PCB待确认 |
+| PWM #2 扩展 | TIM3 CH2 | PC7 | AF2 | 与 TIM3 CH1 共享频率，占用 USART6 RX 候选 | 芯片 AF 已核对，PCB待确认 |
 | SPI #1 | SPI1 | PA5 SCK, PA6 MISO, PA7 MOSI | AF5 | 需要额外软件CS GPIO；占用部分ADC引脚 | PCB待确认 |
 | SPI1 CS(软件) | GPIO | PB12（建议候选） | GPIO输出 | 与SPI2 NSS及TIM1 BKIN互斥；可由资源管理器改变 | PCB待确认 |
 | ADC输入池 | ADC1 | PC0-PC5、PB0/PB1、PA1/PA4等 | Analog | 单ADC时分扫描；仅列芯片候选，按实板与业务占用计算 | PCB待确认 |

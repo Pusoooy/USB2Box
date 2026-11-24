@@ -22,8 +22,9 @@ if ($Mode -eq "Install") {
     $requirements = Join-Path $root "requirements.lock"
     & $python -m pip install --no-index --only-binary=:all: --require-hashes --find-links $wheelhouse -r $requirements
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
-    $sdk = Get-Item -LiteralPath (Join-Path $wheelhouse "usb2xxx-0.1.0-py3-none-any.whl")
-    & $python -m pip install --no-index --no-deps $sdk.FullName
+    $sdk = @(Get-ChildItem -LiteralPath $wheelhouse -File -Filter "usb2xxx-*-py3-none-any.whl")
+    if ($sdk.Count -ne 1) { throw "Expected exactly one USB2XXX SDK wheel." }
+    & $python -m pip install --no-index --no-deps $sdk[0].FullName
     exit $LASTEXITCODE
 }
 $env:USB2XXX_MOCK_DEVICE = Join-Path $root "mock-device.exe"

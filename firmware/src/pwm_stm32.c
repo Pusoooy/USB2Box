@@ -1,11 +1,16 @@
 #include "pwm_service.h"
 #include "stm32f4xx_hal.h"
 
-static TIM_TypeDef *const timers[] = {TIM5, TIM3};
-static GPIO_TypeDef *const ports[] = {GPIOA, GPIOC};
-static const IRQn_Type irq[] = {TIM5_IRQn, TIM3_IRQn};
-static volatile uint32_t remaining[2];
-static volatile bool running[2];
+static TIM_TypeDef *const timers[PWM_GROUPS] = {TIM5, TIM3};
+static GPIO_TypeDef *const ports[PWM_GROUPS] = {GPIOA, GPIOC};
+static const IRQn_Type irq[PWM_GROUPS] = {TIM5_IRQn, TIM3_IRQn};
+static const uint32_t pins[PWM_GROUPS][PWM_CHANNELS] = {
+    {GPIO_PIN_0, GPIO_PIN_1}, {GPIO_PIN_6, GPIO_PIN_7},
+};
+
+static volatile uint32_t remaining[PWM_GROUPS][PWM_CHANNELS];
+static volatile uint8_t active_channels[PWM_GROUPS], waiting_for_period[PWM_GROUPS];
+static volatile bool pending_update[PWM_GROUPS];
 
 uint32_t pwm_driver_clock(void)
 {
@@ -13,19 +18,50 @@ uint32_t pwm_driver_clock(void)
     return apb1 == HAL_RCC_GetHCLKFreq() ? apb1 : apb1 * 2u;
 }
 
-void pwm_driver_stop(unsigned group)
+static void set_compare(TIM_TypeDef *timer, unsigned channel, uint32_t value)
 {
-    if (!running[group]) return;
-    TIM_TypeDef *timer = timers[group];
-    timer->DIER = 0;
-    /* Keep the channel driving low without modifying shared GPIO in the IRQ. */
-    timer->CCMR1 = TIM_CCMR1_OC1M_2; /* Force inactive */
-    timer->CCER = TIM_CCER_CC1E;     /* Non-inverted low output */
-    timer->CR1 = 0;
-    running[group] = false;
+    if (channel == 0) timer->CCR1 = value;
+    else timer->CCR2 = value;
 }
 
-void pwm_driver_start(unsigned group, const pwm_period *period, uint32_t pulses)
+static void set_mode(TIM_TypeDef *timer, unsigned channel, uint32_t mode)
+{
+    const unsigned shift = channel * 8u;
+    MODIFY_REG(timer->CCMR1, (TIM_CCMR1_OC1M | TIM_CCMR1_OC1PE | TIM_CCMR1_CC1S) << shift,
+               mode << shift);
+}
+
+static void enable_output(TIM_TypeDef *timer, unsigned channel, bool invert)
+{
+    const unsigned shift = channel * 4u;
+    MODIFY_REG(timer->CCER, (TIM_CCER_CC1P | TIM_CCER_CC1E) << shift,
+               (TIM_CCER_CC1E | (invert ? TIM_CCER_CC1P : 0u)) << shift);
+}
+
+void pwm_driver_stop(unsigned group, unsigned channel)
+{
+    const uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    const uint8_t bit = (uint8_t)(1u << channel);
+    if (active_channels[group] & bit) {
+        TIM_TypeDef *timer = timers[group];
+        CLEAR_BIT(timer->DIER, TIM_DIER_CC1IE << channel);
+        waiting_for_period[group] &= (uint8_t)~bit;
+        if (!waiting_for_period[group]) CLEAR_BIT(timer->DIER, TIM_DIER_UIE);
+        /* Keep the electrical level low with the current polarity. */
+        const bool invert = (timer->CCER & (TIM_CCER_CC1P << (channel * 4u))) != 0;
+        set_mode(timer, channel, TIM_CCMR1_OC1M_2 | (invert ? TIM_CCMR1_OC1M_0 : 0u));
+        active_channels[group] &= (uint8_t)~bit;
+        if (!active_channels[group]) {
+            timer->CR1 = 0;
+            timer->DIER = 0;
+            pending_update[group] = false;
+        }
+    }
+    __set_PRIMASK(mask);
+}
+
+void pwm_driver_start(unsigned group, unsigned channel, const pwm_period *period, uint32_t pulses)
 {
     if (group == 0) {
         __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -34,67 +70,114 @@ void pwm_driver_start(unsigned group, const pwm_period *period, uint32_t pulses)
         __HAL_RCC_GPIOC_CLK_ENABLE();
         __HAL_RCC_TIM3_CLK_ENABLE();
     }
-    TIM_TypeDef *timer = timers[group];
-    timer->CR1 = 0;
-    timer->DIER = 0;
-    timer->CCER = 0;
-    timer->PSC = period->prescaler;
-    timer->ARR = period->reload;
-    timer->CCR1 = period->compare;
-    timer->CCMR1 = TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1PE;
-    timer->CR1 = TIM_CR1_ARPE;
-    timer->EGR = TIM_EGR_UG;
-    timer->SR = 0;
-    timer->CCER = TIM_CCER_CC1E | (period->invert ? TIM_CCER_CC1P : 0);
     GPIO_InitTypeDef pin = {
-        .Pin = group == 0 ? GPIO_PIN_0 : GPIO_PIN_6,
-        .Mode = GPIO_MODE_AF_PP, .Pull = GPIO_NOPULL,
+        .Pin = pins[group][channel], .Mode = GPIO_MODE_OUTPUT_PP, .Pull = GPIO_NOPULL,
         .Speed = GPIO_SPEED_FREQ_HIGH, .Alternate = 2,
     };
+    HAL_GPIO_WritePin(ports[group], (uint16_t)pin.Pin, GPIO_PIN_RESET);
     HAL_GPIO_Init(ports[group], &pin);
-    remaining[group] = pulses;
-    running[group] = true;
-    HAL_NVIC_ClearPendingIRQ(irq[group]);
-    HAL_NVIC_SetPriority(irq[group], 5, 0);
-    HAL_NVIC_EnableIRQ(irq[group]);
-    if (pulses) timer->DIER = TIM_DIER_CC1IE;
-    timer->CR1 |= TIM_CR1_CEN;
+
+    const uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    TIM_TypeDef *timer = timers[group];
+    const uint8_t bit = (uint8_t)(1u << channel);
+    const bool joining = active_channels[group] != 0;
+    const uint32_t pwm_mode = TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2;
+    remaining[group][channel] = pulses;
+    active_channels[group] |= bit;
+
+    set_mode(timer, channel, TIM_CCMR1_OC1M_2);
+    enable_output(timer, channel, false);
+    if (joining) {
+        SET_BIT(timer->CR1, TIM_CR1_UDIS);
+        /* Install an inactive compare value, then preload the first complete cycle. */
+        set_compare(timer, channel, period->invert ? timer->ARR + 1u : 0u);
+        set_mode(timer, channel, pwm_mode | TIM_CCMR1_OC1PE);
+        set_compare(timer, channel, period->compare);
+        if (pulses) {
+            waiting_for_period[group] |= bit;
+            timer->SR = ~TIM_SR_UIF;
+            SET_BIT(timer->DIER, TIM_DIER_UIE);
+        }
+    } else {
+        timer->CR1 = TIM_CR1_ARPE;
+        timer->DIER = 0;
+        timer->PSC = period->prescaler;
+        timer->ARR = period->reload;
+        set_mode(timer, channel, pwm_mode | TIM_CCMR1_OC1PE);
+        set_compare(timer, channel, period->compare);
+        timer->EGR = TIM_EGR_UG;
+        timer->SR = 0;
+        if (pulses) SET_BIT(timer->DIER, TIM_DIER_CC1IE << channel);
+        HAL_NVIC_ClearPendingIRQ(irq[group]);
+        HAL_NVIC_SetPriority(irq[group], 5, 0);
+        HAL_NVIC_EnableIRQ(irq[group]);
+    }
+    enable_output(timer, channel, period->invert);
+    pin.Mode = GPIO_MODE_AF_PP;
+    HAL_GPIO_Init(ports[group], &pin);
+    if (joining) CLEAR_BIT(timer->CR1, TIM_CR1_UDIS);
+    else SET_BIT(timer->CR1, TIM_CR1_CEN);
+    __set_PRIMASK(mask);
 }
 
-bool pwm_driver_running(unsigned group) { return running[group]; }
+bool pwm_driver_running(unsigned group, unsigned channel)
+{
+    return (active_channels[group] & (1u << channel)) != 0;
+}
 
-bool pwm_driver_update(unsigned group, const pwm_period *period)
+bool pwm_driver_update(unsigned group, const pwm_period periods[PWM_CHANNELS])
 {
     const uint32_t mask = __get_PRIMASK();
     __disable_irq();
-    const bool active = running[group];
+    const uint8_t active = active_channels[group];
     if (active) {
         TIM_TypeDef *timer = timers[group];
-        /* Defer update events during the writes. PSC, ARR and CCR1
-         * take effect together at the next natural counter overflow. */
+        const pwm_period *clock = &periods[(active & 1u) ? 0 : 1];
+        /* Transfer the shared timebase and both compare preloads in one update. */
         SET_BIT(timer->CR1, TIM_CR1_UDIS);
-        timer->PSC = period->prescaler;
-        timer->ARR = period->reload;
-        timer->CCR1 = period->compare;
+        timer->PSC = clock->prescaler;
+        timer->ARR = clock->reload;
+        for (unsigned channel = 0; channel < PWM_CHANNELS; ++channel)
+            if (active & (1u << channel)) set_compare(timer, channel, periods[channel].compare);
         timer->SR = ~TIM_SR_UIF;
+        pending_update[group] = true;
         CLEAR_BIT(timer->CR1, TIM_CR1_UDIS);
     }
     __set_PRIMASK(mask);
-    return active;
+    return active != 0;
 }
 
 bool pwm_driver_update_pending(unsigned group)
 {
-    return !(timers[group]->SR & TIM_SR_UIF);
+    if (pending_update[group] && (timers[group]->SR & TIM_SR_UIF))
+        pending_update[group] = false;
+    return pending_update[group];
 }
 
 static void compare_irq(unsigned group)
 {
     TIM_TypeDef *timer = timers[group];
-    if (!(timer->SR & TIM_SR_CC1IF)) return;
-    timer->SR = ~TIM_SR_CC1IF;
-    if (running[group] && remaining[group] && --remaining[group] == 0)
-        pwm_driver_stop(group);
+    if ((timer->DIER & TIM_DIER_UIE) && (timer->SR & TIM_SR_UIF)) {
+        timer->SR = ~TIM_SR_UIF;
+        pending_update[group] = false;
+        /* A joining output starts counting its finite pulses after its first reload. */
+        for (unsigned channel = 0; channel < PWM_CHANNELS; ++channel)
+            if (waiting_for_period[group] & (1u << channel)) {
+                timer->SR = ~(TIM_SR_CC1IF << channel);
+                SET_BIT(timer->DIER, TIM_DIER_CC1IE << channel);
+            }
+        waiting_for_period[group] = 0;
+        CLEAR_BIT(timer->DIER, TIM_DIER_UIE);
+    }
+    for (unsigned channel = 0; channel < PWM_CHANNELS; ++channel) {
+        const uint32_t flag = TIM_SR_CC1IF << channel;
+        if ((timer->DIER & (TIM_DIER_CC1IE << channel)) && (timer->SR & flag)) {
+            timer->SR = ~flag;
+            if (remaining[group][channel] && --remaining[group][channel] == 0)
+                pwm_driver_stop(group, channel);
+        }
+    }
 }
 
 void TIM5_IRQHandler(void) { compare_irq(0); }

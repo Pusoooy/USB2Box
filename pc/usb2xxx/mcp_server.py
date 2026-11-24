@@ -20,6 +20,7 @@ log = logging.getLogger("usb2xxx.mcp")
 Port = Annotated[int, Field(ge=0, le=1)]
 Channel = Annotated[int, Field(ge=0, le=18)]
 ReadLength = Annotated[int, Field(ge=1, le=248)]
+PWMChannel = Annotated[int, Field(ge=1, le=2)]
 
 
 class Adapter:
@@ -207,31 +208,36 @@ def create_server(adapter: Adapter) -> FastMCP:
     def usb2xxx_pwm_configure(group: Port, frequency_hz: Annotated[int, Field(ge=1, le=100000)],
                               duty_ppm: Annotated[int, Field(ge=0, le=1000000)],
                               invert: bool = False, confirm: bool = False,
-                              dry_run: bool = False) -> dict:
+                              dry_run: bool = False, channel: PWMChannel = 1) -> dict:
         """Prepare a bounded configuration without starting PWM output."""
-        return adapter.use(lambda dev: dev.pwm_configure(group, frequency_hz, duty_ppm, invert),
+        return adapter.use(lambda dev: dev.pwm_configure(group, frequency_hz, duty_ppm, invert, channel=channel),
                            mutating=True, confirm=confirm, dry_run=dry_run)
 
     @server.tool()
     def usb2xxx_pwm_start(group: Port, duration_ms: Annotated[int, Field(ge=1, le=1000)],
                           pulses: Annotated[int, Field(ge=0, le=10000)] = 0,
-                          arm: bool = False, confirm: bool = False) -> dict:
+                          arm: bool = False, confirm: bool = False, channel: PWMChannel = 1) -> dict:
         """Start a prepared PWM output for at most one second."""
-        return adapter.use(lambda dev: dev.pwm_start(group, duration_ms, pulses),
+        return adapter.use(lambda dev: dev.pwm_start(group, duration_ms, pulses, channel=channel),
                            mutating=True, confirm=arm and confirm)
 
     @server.tool()
     def usb2xxx_pwm_update(group: Port, frequency_hz: Annotated[int, Field(ge=1, le=100000)],
                            duty_ppm: Annotated[int, Field(ge=0, le=1000000)],
-                           invert: bool = False, confirm: bool = False) -> dict:
+                           invert: bool = False, confirm: bool = False, channel: PWMChannel = 1) -> dict:
         """Queue a period-boundary update without extending the PWM deadline."""
-        return adapter.use(lambda dev: dev.pwm_update(group, frequency_hz, duty_ppm, invert),
+        return adapter.use(lambda dev: dev.pwm_update(group, frequency_hz, duty_ppm, invert, channel=channel),
                            mutating=True, confirm=confirm)
 
     @server.tool()
-    def usb2xxx_pwm_stop(group: Port) -> dict:
-        """Stop and release one PWM group."""
-        return adapter.use(lambda dev: dev.pwm_stop(group))
+    def usb2xxx_pwm_status(group: Port, channel: PWMChannel = 1) -> dict:
+        """Read the applied frequency, duty resolution and status of an output."""
+        return adapter.use(lambda dev: dev.pwm_status(group, channel=channel))
+
+    @server.tool()
+    def usb2xxx_pwm_stop(group: Port, channel: PWMChannel = 1) -> dict:
+        """Stop and release one PWM output."""
+        return adapter.use(lambda dev: dev.pwm_stop(group, channel=channel))
 
     @server.tool()
     def usb2xxx_spi_transfer(

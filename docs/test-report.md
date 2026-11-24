@@ -97,3 +97,18 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 ### ADC timing, recovery and diagnostics
 
 `make -j2 verify-all` exited 0. The shared ADC planner selected 8 bits when a two-rank sequence could not meet the configured rate at 12 or 10 bits. Host tests verified per-rank positions, tagged metadata, VREFINT conversion, nine-clock recovery limits, SDA release, timeout with SCL held low, SPI partial results on error/timeout/cancel, a bounded diagnostic log, and Linux process-level lock contention and release. MCP stdio exercised typed I²C events, the PWM update gate and timed ADC captures. Release linked at 46,856 B flash and 33,276 B static RAM. These timings and voltage results use planned device clocks or simulation, and physical results remain `NOT_RUN`. [Original log](evidence/m12-timing-verify.log)
+
+## M12 0.1.1 开发候选
+
+| 验证 | 结果 | 执行与覆盖 |
+|---|---|---|
+| 完整软件回归 | exit 0 | `make -B -j2 verify-all`，应用 CPython 3.12、ARM GCC 14.2.1 和固定依赖。Host、SDK、PySide6 offscreen、官方 MCP stdio 及 152 条需求 ID 和选项检查通过 |
+| C Host UBSan | exit 0 | `make -B test-device test-runtime test-uart test-i2c test-pwm test-spi test-adc test-stream`，启用 UndefinedBehaviorSanitizer，失败立即停止 |
+| ARM 构建 | exit 0 | 默认配置及 8、25 MHz HSE 候选都生成 Debug/Release。向量、栈边界和分配器符号检查通过 |
+| PWM 安全与捕获 | HOST_MOCK_PASS | 独立启动停止、同组频率与独立占空比、有限脉冲、资源冲突和周期更新。设备重置、挂起、租约到期均关闭四个输出并释放资源。两组各两通道的捕获脚本经模拟设备处理更新前后测量 |
+| ADC 采集脚本 | HOST_MOCK_PASS | 100 kSPS 配置的 1 秒 Mock 采集收到 100,000 样本，偏移连续，无丢样或超时。有独立控制请求延迟数据，NumPy 与原始二进制可往返验证 |
+| Linux 离线 SDK | exit 0 | 独立虚拟环境从带哈希的本地 wheelhouse 安装，`pip check` 以及 CLI 状态、PWM CH2、I²C 恢复、VREFINT 模拟操作通过 |
+| Windows x64 候选 | Linux 静态校验通过 | 117 项 SHA-256、PE32+ 模拟器与 libusb DLL、CPython 3.12 Windows 目标的哈希锁定离线解析、ZIP 完整性 |
+| H00–H09 与 Windows 10/11 运行 | NOT_RUN / WAITING_HARDWARE | `make hil-verify` 缺设备及合法 VID/PID 返回 2。实板波形、WinUSB、USB 连续 100 kSPS 仍待采集 |
+
+默认 Debug 链接结果为 57,124 B Flash、33,444 B 静态 RAM，Release 为 48,108 B Flash、33,436 B 静态 RAM，另留 8 KiB 栈。Windows 候选 ZIP 的 SHA-256 为 `8ad222c1e01caf089ee48449be495ca1676e763a6c32553b478c7d53c9f22dd4`。运行时日志保留了 Qt offscreen、上游 MCP 设置定义与 pip 缓存目录提示。[原始日志](evidence/m12-channels-verify.log)

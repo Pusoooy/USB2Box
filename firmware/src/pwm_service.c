@@ -1,13 +1,24 @@
 #include "pwm_service.h"
 
 typedef struct {
-    pwm_period period, next;
+    pwm_period period;
     uint32_t deadline;
-    bool configured, updating, pulsed;
-} pwm_state;
+    bool configured, pulsed;
+} pwm_output;
 
-static pwm_state groups[2];
+typedef struct {
+    pwm_output outputs[PWM_CHANNELS];
+    pwm_period next[PWM_CHANNELS];
+    bool updating;
+} pwm_group;
+
+static pwm_group groups[PWM_GROUPS];
 static bool capture;
+
+static const uint8_t output_pin[PWM_GROUPS][PWM_CHANNELS] = {
+    {RESOURCE_PIN('A', 0), RESOURCE_PIN('A', 1)},
+    {RESOURCE_PIN('C', 6), RESOURCE_PIN('C', 7)},
+};
 
 bool pwm_calculate(uint32_t clock, unsigned width, uint32_t frequency,
                    uint32_t duty, pwm_period *period)
@@ -27,21 +38,34 @@ bool pwm_calculate(uint32_t clock, unsigned width, uint32_t frequency,
     period->frequency_millihz = (uint32_t)(((uint64_t)clock * 1000u + cycle * divider / 2u) /
                                            (cycle * divider));
     period->duty_ppm = (uint32_t)((compare * 1000000u + cycle / 2u) / cycle);
+    period->requested_duty = duty;
     return true;
 }
 
-static void stop_group(resources *pool, unsigned group)
+static bool group_running(unsigned group)
 {
-    if (!groups[group].configured) return;
-    pwm_driver_stop(group);
-    groups[group].configured = false;
-    groups[group].updating = groups[group].pulsed = false;
-    resource_release(pool, (uint8_t)(5 + group));
+    return pwm_driver_running(group, 0) || pwm_driver_running(group, 1);
+}
+
+static void stop_output(resources *pool, unsigned group, unsigned channel)
+{
+    pwm_output *output = &groups[group].outputs[channel];
+    if (!output->configured) return;
+    pwm_driver_stop(group, channel);
+    output->configured = output->pulsed = false;
+    const uint8_t owner = (uint8_t)(5 + group);
+    resource_release_item(pool, owner, output_pin[group][channel]);
+    if (!groups[group].outputs[1 - channel].configured) {
+        groups[group].updating = false;
+        resource_release(pool, owner);
+    }
 }
 
 void pwm_stop_all(resources *pool)
 {
-    for (unsigned group = 0; group < 2; ++group) stop_group(pool, group);
+    for (unsigned group = 0; group < PWM_GROUPS; ++group)
+        for (unsigned channel = 0; channel < PWM_CHANNELS; ++channel)
+            stop_output(pool, group, channel);
     if (capture) pwm_capture_stop();
     capture = false;
     resource_release(pool, 9);
@@ -49,18 +73,24 @@ void pwm_stop_all(resources *pool)
 
 void pwm_poll(uint32_t now)
 {
-    for (unsigned group = 0; group < 2; ++group)
-        if (groups[group].configured && pwm_driver_running(group) &&
-            now - groups[group].deadline < 0x80000000u) pwm_driver_stop(group);
+    for (unsigned group = 0; group < PWM_GROUPS; ++group) {
+        for (unsigned channel = 0; channel < PWM_CHANNELS; ++channel) {
+            const pwm_output *output = &groups[group].outputs[channel];
+            if (output->configured && pwm_driver_running(group, channel) &&
+                now - output->deadline < 0x80000000u)
+                pwm_driver_stop(group, channel);
+        }
+    }
 }
 
 static void refresh_period(unsigned group)
 {
-    pwm_state *state = &groups[group];
-    if (state->updating && (!pwm_driver_running(group) || !pwm_driver_update_pending(group))) {
-        state->period = state->next;
-        state->updating = false;
-    }
+    pwm_group *state = &groups[group];
+    if (!state->updating || (group_running(group) && pwm_driver_update_pending(group))) return;
+    for (unsigned channel = 0; channel < PWM_CHANNELS; ++channel)
+        if (state->outputs[channel].configured)
+            state->outputs[channel].period = state->next[channel];
+    state->updating = false;
 }
 
 static bool suitable_for_count(const pwm_period *period, uint32_t clock)
@@ -71,8 +101,62 @@ static bool suitable_for_count(const pwm_period *period, uint32_t clock)
            (period->reload + 1u - period->compare) * divider >= min_ticks;
 }
 
-uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
-                     uint16_t length, uint8_t *out, uint16_t *written, uint32_t now)
+static uint16_t reserve_output(resources *pool, unsigned group, unsigned channel)
+{
+    resource_plan plan = {0};
+    resource_add(&plan, output_pin[group][channel]);
+    resource_add(&plan, RESOURCE_TIMER(group == 0 ? 5 : 3));
+    uint8_t conflict;
+    return resource_reserve(pool, &plan, (uint8_t)(5 + group), &conflict);
+}
+
+static uint16_t configure(resources *pool, unsigned group, unsigned channel, bool update,
+                          uint32_t frequency, uint32_t duty, bool invert)
+{
+    pwm_group *state = &groups[group];
+    pwm_output *output = &state->outputs[channel];
+    pwm_output *sibling = &state->outputs[1 - channel];
+    const bool running = pwm_driver_running(group, channel);
+    const bool sibling_running = pwm_driver_running(group, 1 - channel);
+    if (state->updating || (running && !update) || (update && !output->configured && sibling_running))
+        return STATUS_BUSY;
+    const uint32_t clock = pwm_driver_clock();
+    const unsigned width = group == 0 ? 32 : 16;
+    pwm_period plans[PWM_CHANNELS] = {0};
+    pwm_period *plan = &plans[channel];
+    if (!pwm_calculate(clock, width, frequency, duty, plan)) return STATUS_VALUE;
+    plan->invert = invert;
+    if (running && (invert != output->period.invert ||
+        (output->pulsed && !suitable_for_count(plan, clock)))) return STATUS_VALUE;
+
+    if (sibling->configured) {
+        if (!update) {
+            if (plan->prescaler != sibling->period.prescaler || plan->reload != sibling->period.reload)
+                return STATUS_BUSY;
+        } else {
+            pwm_period *other = &plans[1 - channel];
+            if (!pwm_calculate(clock, width, frequency, sibling->period.requested_duty, other))
+                return STATUS_VALUE;
+            other->invert = sibling->period.invert;
+            if (sibling_running && sibling->pulsed && !suitable_for_count(other, clock))
+                return STATUS_VALUE;
+        }
+    }
+    const uint16_t status = reserve_output(pool, group, channel);
+    if (status != STATUS_OK) return status;
+    output->configured = true;
+    if (update && (running || sibling_running) && pwm_driver_update(group, plans)) {
+        for (unsigned track = 0; track < PWM_CHANNELS; ++track) state->next[track] = plans[track];
+        state->updating = true;
+    } else {
+        output->period = *plan;
+        if (update && sibling->configured) sibling->period = plans[1 - channel];
+    }
+    return STATUS_OK;
+}
+
+static uint16_t capture_command(resources *pool, uint8_t opcode, const uint8_t *input,
+                                   uint16_t length, uint8_t *out, uint16_t *written)
 {
     if (opcode == 6) {
         if (length != 4 || capture || !wire_u32(input)) return STATUS_VALUE;
@@ -86,87 +170,79 @@ uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
         if (!capture) resource_release(pool, 9);
         return capture ? STATUS_OK : STATUS_VALUE;
     }
+    if (length || !capture) return STATUS_VALUE;
     if (opcode == 7) {
-        if (length || !capture) return STATUS_VALUE;
         uint32_t period, high, clock;
         if (!pwm_capture_read(&period, &high, &clock)) return STATUS_BUSY;
         wire_put32(out, period);
         wire_put32(out + 4, high);
         wire_put32(out + 8, clock);
         *written = 12;
-        return STATUS_OK;
-    }
-    if (opcode == 8) {
-        if (length || !capture) return STATUS_VALUE;
+    } else {
         pwm_capture_stop();
         capture = false;
         resource_release(pool, 9);
-        return STATUS_OK;
     }
-    if (!length || input[0] > 1) return STATUS_VALUE;
+    return STATUS_OK;
+}
+
+uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
+                     uint16_t length, uint8_t *out, uint16_t *written, uint32_t now)
+{
+    if (opcode >= 6 && opcode <= 8)
+        return capture_command(pool, opcode, input, length, out, written);
+    if (!length || input[0] >= PWM_GROUPS) return STATUS_VALUE;
     const unsigned group = input[0];
-    pwm_state *state = &groups[group];
+    unsigned channel = 0;
+    ++input;
+    --length;
+    if (opcode >= 9 && opcode <= 13) {
+        if (!length || input[0] == 0 || input[0] > PWM_CHANNELS) return STATUS_VALUE;
+        channel = input[0] - 1;
+        ++input;
+        --length;
+        opcode -= 8;
+    }
+    pwm_group *state = &groups[group];
+    pwm_output *output = &state->outputs[channel];
     refresh_period(group);
     switch (opcode) {
     case 1:
     case 3: {
-        if (length != 10 || input[9] > 1) return STATUS_VALUE;
-        const bool running = pwm_driver_running(group);
-        if (running && (opcode == 1 || state->updating)) return STATUS_BUSY;
-        pwm_period period;
-        const uint32_t clock = pwm_driver_clock();
-        if (!pwm_calculate(clock, group == 0 ? 32 : 16,
-                           wire_u32(input + 1), wire_u32(input + 5), &period)) return STATUS_VALUE;
-        period.invert = input[9] != 0;
-        if (running) {
-            if (period.invert != state->period.invert ||
-                (state->pulsed && !suitable_for_count(&period, clock))) return STATUS_VALUE;
-            if (pwm_driver_update(group, &period)) {
-                state->next = period;
-                state->updating = true;
-                break;
-            }
-            /* The last finite pulse may have ended between the two checks. */
-        }
-        resource_plan plan = {0};
-        resource_add(&plan, group == 0 ? RESOURCE_PIN('A', 0) : RESOURCE_PIN('C', 6));
-        resource_add(&plan, RESOURCE_TIMER(group == 0 ? 5 : 3));
-        uint8_t conflict;
-        const uint16_t status = resource_reserve(pool, &plan, (uint8_t)(5 + group), &conflict);
+        if (length != 9 || input[8] > 1) return STATUS_VALUE;
+        const uint16_t status = configure(pool, group, channel, opcode == 3, wire_u32(input),
+                                          wire_u32(input + 4), input[8] != 0);
         if (status != STATUS_OK) return status;
-        state->period = period;
-        state->configured = true;
         break;
     }
     case 2: {
-        if (length != 9 || !state->configured) return STATUS_VALUE;
-        if (pwm_driver_running(group)) return STATUS_BUSY;
-        const uint32_t duration = wire_u32(input + 1), pulses = wire_u32(input + 5);
+        if (length != 8 || !output->configured) return STATUS_VALUE;
+        if (pwm_driver_running(group, channel) || state->updating) return STATUS_BUSY;
+        const uint32_t duration = wire_u32(input), pulses = wire_u32(input + 4);
         if (!duration || duration > 60000) return STATUS_VALUE;
-        if (pulses && !suitable_for_count(&state->period, pwm_driver_clock()))
-            return STATUS_VALUE;
-        state->deadline = now + duration;
-        state->pulsed = pulses != 0;
-        pwm_driver_start(group, &state->period, pulses);
+        if (pulses && !suitable_for_count(&output->period, pwm_driver_clock())) return STATUS_VALUE;
+        output->deadline = now + duration;
+        output->pulsed = pulses != 0;
+        pwm_driver_start(group, channel, &output->period, pulses);
         break;
     }
     case 4:
-        if (length != 1) return STATUS_VALUE;
-        stop_group(pool, group);
+        if (length) return STATUS_VALUE;
+        stop_output(pool, group, channel);
         return STATUS_OK;
     case 5:
-        if (length != 1 || !state->configured) return STATUS_VALUE;
+        if (length || !output->configured) return STATUS_VALUE;
         break;
     default:
         return STATUS_OPCODE;
     }
     refresh_period(group);
-    const pwm_period *period = opcode == 3 && state->updating ? &state->next : &state->period;
+    const pwm_period *period = opcode == 3 && state->updating ? &state->next[channel] : &output->period;
     wire_put32(out, period->frequency_millihz);
     wire_put32(out + 4, period->duty_ppm);
     wire_put32(out + 8, period->prescaler);
     wire_put32(out + 12, period->reload);
-    out[16] = pwm_driver_running(group) ? (uint8_t)(1 | (state->updating ? 2 : 0)) : 0;
+    out[16] = pwm_driver_running(group, channel) ? (uint8_t)(1 | (state->updating ? 2 : 0)) : 0;
     *written = 17;
     return STATUS_OK;
 }

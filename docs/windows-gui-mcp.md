@@ -52,9 +52,11 @@ with USB2XXX.open(serial="...") as dev:
 | `usb2xxx_uart_configure` | uart_id, baud, parity, stop bits | 配置 |
 | `usb2xxx_uart_write` | UART发送二进制/文本(大小上限) | 写操作 |
 | `usb2xxx_uart_read` | 最大长度/超时 | 读数据 |
-| `usb2xxx_pwm_configure` | 输出、频率Hz、duty_ppm、极性 | 输出风险 |
-| `usb2xxx_pwm_start` | 资源租约、最大持续时间、明确arm | 输出风险 |
-| `usb2xxx_pwm_stop` | 安全停止指定输出/全部PWM | 安全控制 |
+| `usb2xxx_pwm_configure` | 频率组、通道、频率 Hz、duty_ppm、极性 | 输出风险 |
+| `usb2xxx_pwm_start` | 频率组、通道、最大持续时间、明确 arm | 输出风险 |
+| `usb2xxx_pwm_update` | 周期边界更新，同组各通道共享频率 | 输出风险 |
+| `usb2xxx_pwm_status` | 查询频率、占空比、TIM、通道、分辨率和运行标志 | 只读 |
+| `usb2xxx_pwm_stop` | 安全停止指定频率组中的一个输出 | 安全控制 |
 | `usb2xxx_spi_transfer` | 控制器、CS、模式、读/写分段和超时 | 写操作 |
 | `usb2xxx_adc_read` | 输入通道/采样周期/分辨率 | 只读采样 |
 | `usb2xxx_adc_capture` | 通道序列、采样率、长度、触发、timeout | 资源消耗 |

@@ -22,6 +22,7 @@ enum {
     FEATURE_ADC_TIMING = 1u << 3,
     FEATURE_I2C_RECOVERY = 1u << 4,
     FEATURE_DIAGNOSTIC_LOG = 1u << 5,
+    FEATURE_PWM_CHANNELS = 1u << 6,
     DEVICE_LOG_CAPACITY = 16,
 };
 

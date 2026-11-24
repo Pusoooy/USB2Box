@@ -39,14 +39,23 @@ class MCPTests(unittest.TestCase):
                         "group": 0, "duration_ms": 1001, "arm": True, "confirm": True})
                     self.assertTrue(too_long.isError)
                     config = outcome(await session.call_tool("usb2xxx_pwm_configure", {
-                        "group": 0, "frequency_hz": 1000, "duty_ppm": 250000, "confirm": True}))
+                        "group": 0, "frequency_hz": 1000, "duty_ppm": 250000, "channel": 2,
+                        "confirm": True}))
                     self.assertEqual(config["status"], "ok")
                     started = outcome(await session.call_tool("usb2xxx_pwm_start", {
-                        "group": 0, "duration_ms": 100, "arm": True, "confirm": True}))
+                        "group": 0, "duration_ms": 100, "arm": True, "confirm": True, "channel": 2}))
                     self.assertTrue(started["actual_values"]["running"])
                     updated = outcome(await session.call_tool("usb2xxx_pwm_update", {
-                        "group": 0, "frequency_hz": 1200, "duty_ppm": 350000, "confirm": True}))
+                        "group": 0, "frequency_hz": 1200, "duty_ppm": 350000, "channel": 2,
+                        "confirm": True}))
                     self.assertEqual(updated["status"], "ok")
+                    state = outcome(await session.call_tool("usb2xxx_pwm_status", {
+                        "group": 0, "channel": 2}))
+                    self.assertEqual(state["actual_values"]["channel"], 2)
+                    self.assertEqual(state["actual_values"]["timer"], "TIM5")
+                    stopped = outcome(await session.call_tool("usb2xxx_pwm_stop", {
+                        "group": 0, "channel": 2}))
+                    self.assertEqual(stopped["status"], "ok")
                     slave = outcome(await session.call_tool("usb2xxx_i2c_slave_configure", {
                         "bus_id": 1, "address": 42, "reply_hex": "aabb", "confirm": True}))
                     self.assertEqual(slave["status"], "ok")

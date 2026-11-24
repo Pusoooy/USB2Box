@@ -1,4 +1,6 @@
 #include "adc_service.h"
+#include "app.h"
+#include "pwm_service.h"
 #include "stream.h"
 #include "uart_service.h"
 #include <assert.h>
@@ -29,6 +31,46 @@ static void setup(resources *pool)
         assert(uart_command(pool, 4, data, sizeof data, out, &result) == STATUS_OK);
     }
     uart_poll();
+}
+
+static void verify_link_stop(void)
+{
+    device dev;
+    app_init();
+    device_init(&dev, app_command, app_stop);
+    for (unsigned event = 0; event < 3; ++event) {
+        const uint32_t now = (event + 1) * 3000u;
+        const frame_header open = {
+            .type = 1, .opcode = SYS_OPEN, .flags = FLAG_FIRST | FLAG_LAST, .request_id = event + 1,
+        };
+        uint8_t wire[FRAME_HEADER_SIZE], out[DEVICE_FRAGMENT];
+        frame_encode(wire, &open);
+        assert(device_feed(&dev, wire, sizeof wire, now) == sizeof wire && dev.active);
+        size_t length;
+        device_reply(&dev, &length);
+        device_consume_reply(&dev, length);
+
+        uint16_t written;
+        for (uint8_t group = 0; group < PWM_GROUPS; ++group)
+            for (uint8_t channel = 1; channel <= PWM_CHANNELS; ++channel) {
+                const uint8_t cfg[] = {group, channel, 0xe8, 3, 0, 0, 0x90, 0xd0, 3, 0, channel - 1};
+                const uint8_t start[] = {group, channel, 0x88, 0x13, 0, 0, 0, 0, 0, 0};
+                assert(app_command(SERVICE_PWM, 9, cfg, sizeof cfg, out, &written, now) == STATUS_OK);
+                assert(app_command(SERVICE_PWM, 10, start, sizeof start, out, &written, now) == STATUS_OK);
+                assert(pwm_driver_running(group, channel - 1));
+            }
+        if (event == 0) device_reset(&dev);
+        else if (event == 1) device_suspend(&dev);
+        else device_tick(&dev, now + DEVICE_LEASE_MS);
+        assert(!dev.active);
+        for (unsigned group = 0; group < PWM_GROUPS; ++group)
+            for (unsigned channel = 0; channel < PWM_CHANNELS; ++channel)
+                assert(!pwm_driver_running(group, channel));
+        assert(app_command(SERVICE_SYS, SYS_RESOURCES, NULL, 0, out, &written, now) == STATUS_OK);
+        for (unsigned index = 0; index < written; ++index)
+            assert(out[index] == 0 || out[index] == RESOURCE_SYSTEM_OWNER);
+    }
+    puts("link reset, suspend and lease expiry stop all PWM channels and release resources");
 }
 
 int main(void)
@@ -67,4 +109,5 @@ int main(void)
     uart_stop_all(&pool);
     adc_stop_all(&pool);
     puts("round-robin ADC/UART multiplexing, wrap and partial frame draining passed");
+    verify_link_stop();
 }

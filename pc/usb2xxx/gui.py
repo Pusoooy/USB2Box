@@ -433,16 +433,19 @@ class Workbench(QMainWindow):
             self.submit(send)
 
     def _build_pwm(self):
-        page = self._panel("PWM", [("group", "Frequency group", "0"), ("freq", "Frequency Hz", "1000"),
+        page = self._panel("PWM", [("group", "Frequency group", "0"), ("channel", "Channel (1 or 2)", "1"),
+                                   ("freq", "Frequency Hz", "1000"),
                                    ("duty", "Duty ppm", "250000"), ("invert", "Invert (0 or 1)", "0"),
                                    ("ms", "Maximum duration ms", "500"), ("pulses", "Pulse count", "0")])
         self._action(page, "Configure", lambda d, v: d.pwm_configure(int(v["group"]), int(v["freq"]),
-                      int(v["duty"]), bool(int(v["invert"]))))
+                      int(v["duty"]), bool(int(v["invert"])), channel=int(v["channel"])))
         self._action(page, "Update at period", lambda d, v: d.pwm_update(
-            int(v["group"]), int(v["freq"]), int(v["duty"]), bool(int(v["invert"]))))
-        self._action(page, "Start bounded output", lambda d, v: d.pwm_start(int(v["group"]), int(v["ms"]), int(v["pulses"])))
-        self._action(page, "Actual", lambda d, v: d.pwm_status(int(v["group"])))
-        self._action(page, "Stop", lambda d, v: d.pwm_stop(int(v["group"])))
+            int(v["group"]), int(v["freq"]), int(v["duty"]), bool(int(v["invert"])),
+            channel=int(v["channel"])))
+        self._action(page, "Start bounded output", lambda d, v: d.pwm_start(
+            int(v["group"]), int(v["ms"]), int(v["pulses"]), channel=int(v["channel"])))
+        self._action(page, "Actual", lambda d, v: d.pwm_status(int(v["group"]), channel=int(v["channel"])))
+        self._action(page, "Stop", lambda d, v: d.pwm_stop(int(v["group"]), channel=int(v["channel"])))
         self._action(page, "Capture PB6", lambda d, _: d.pwm_capture_start())
         self._action(page, "Measure", lambda d, _: d.pwm_capture_read())
         self._action(page, "Release input", lambda d, _: d.pwm_capture_stop())

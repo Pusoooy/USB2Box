@@ -43,7 +43,8 @@ def main() -> None:
     pwm = commands.add_parser("pwm")
     pwm.add_argument("frequency", type=int)
     pwm.add_argument("duty", type=int)
-    pwm.add_argument("--group", type=int, default=0)
+    pwm.add_argument("--group", choices=(0, 1), type=int, default=0)
+    pwm.add_argument("--channel", choices=(1, 2), type=int, default=1)
     pwm.add_argument("--duration", type=int, default=100)
     args = parser.parse_args()
     try:
@@ -100,10 +101,10 @@ def _run(args, dev: USB2XXX):
         return dev.i2c_transfer(args.bus, args.address, messages).hex()
     if args.command == "pwm":
         from time import sleep
-        dev.pwm_configure(args.group, args.frequency, args.duty)
-        result = dev.pwm_start(args.group, args.duration)
+        dev.pwm_configure(args.group, args.frequency, args.duty, channel=args.channel)
+        result = dev.pwm_start(args.group, args.duration, channel=args.channel)
         sleep(args.duration / 1000)
-        dev.pwm_stop(args.group)
+        dev.pwm_stop(args.group, channel=args.channel)
         result["running"] = False
         return result
     raise ValueError("unknown command")

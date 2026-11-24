@@ -85,11 +85,11 @@
 
 ### I²C（service 1）
 
-首字节为总线 0 或 1。命令 1 追加速率 u32。命令 2 追加角色 u8（0=主机、1=从机）与 7-bit 从机地址。命令 3 追加任务 ID u32、超时毫秒 u32、7-bit 地址、消息数（1–8），再逐项附读写方向 u8（0=write、1=read）、长度 u8 及写数据。主机组合事务在各消息间生成 repeated START，最后 STOP。命令 4 设置从机发送缓存，命令 5 读取从机接收累计数 u32、错误数 u32 和最新接收字节，命令 6 释放总线。SYS_CANCEL=9、SYS_COLLECT=11 接收任务 ID u32。收集结果为操作状态 u16、已读字节数 u16 和已读数据。超时后的部分结果只包括已完成消息中的读字节。
+首字节为总线 0 或 1。命令 1 追加速率 u32。命令 2 追加角色 u8（0=主机、1=从机）与 7-bit 从机地址。命令 3 追加任务 ID u32、超时毫秒 u32、7-bit 地址、消息数（1–8），再逐项附读写方向 u8（0=write、1=read）、长度 u8 及写数据。主机组合事务在各消息间生成 repeated START，最后 STOP。命令 4 设置从机发送缓存，命令 5 读取从机接收累计数 u32、错误数 u32 和队列中最早的接收字节，命令 6 释放总线。SYS_CANCEL=9、SYS_COLLECT=11 接收任务 ID u32。收集结果为操作状态 u16、已读字节数 u16 和已读数据。超时后的部分结果只包括已完成消息中的读字节。
 
 ### PWM（service 3）
 
-首字节为频率组 0（TIM5）或 1（TIM3）。配置 1 和更新 3 追加频率 Hz u32、占空比 ppm u32、反相 u8，运行中更新返回 busy。启动 2 追加持续时间 ms u32（1–60,000）和脉冲数 u32（0 表示只用时限）。停止 4 释放资源，查询 5 返回实际频率 mHz、实际占空比 ppm、PSC、ARR（各 u32）以及运行标志 u8。有限脉冲使用比较中断，当前要求高、低两相各至少 10 µs，物理脉冲和输入捕获待 HIL。
+首字节为频率组 0（TIM5）或 1（TIM3）。配置 1 和更新 3 追加频率 Hz u32、占空比 ppm u32、反相 u8。启动 2 追加持续时间 ms u32（1–60,000）和脉冲数 u32（0 表示只用时限）。停止 4 释放资源，查询 5 返回实际频率 mHz、实际占空比 ppm、PSC、ARR（各 u32）以及运行标志 u8。这五项默认操作 CH1。有限脉冲使用比较中断，当前要求高、低两相各至少 10 µs，物理脉冲和输入捕获待 HIL。
 
 ### SPI（service 4）
 
@@ -97,7 +97,7 @@
 
 ### ADC（service 5）
 
-配置 1 接收分辨率 u8（0 默认 12，或 6/8/10/12）、序列长度 u8、各通道和采样时间代码（各 u8）。读一次 2 启动软件触发，要求单通道配置。启动 3 接收合计速率 Hz u32、有限样本数、预触发数、后触发数（各 u16）。有限与预后模式互斥，零计数代表持续采集，预触发由命令 5 软件触发。停止 4 释放资源。读取 6 携带最多读取样本数 u16。命令 7 增加 0x82 的块级 credit（u16，最多积累 16）；流帧 type=4、stream=1，seq 自然回绕。控制读取和流共同消费缓冲。
+配置 1 接收分辨率 u8（0 自动，或 6/8/10/12）、序列长度 u8、各通道和采样时间代码（各 u8）。读一次 2 启动软件触发，要求单通道配置。启动 3 接收合计速率 Hz u32、有限样本数、预触发数、后触发数（各 u16）。有限与预后模式互斥，零计数代表持续采集，预触发由命令 5 软件触发。停止 4 释放资源。读取 6 携带最多读取样本数 u16。命令 7 增加 0x82 的块级 credit（u16，最多积累 16），流帧 type=4、stream=1，seq 自然回绕。控制读取和流共同消费缓冲。
 
 负载为实际合计速率、首样本偏移、丢失数（各 u32），样本数 u16、分辨率 u8 和标志 u8（bit0运行、bit1等待触发），最后为 uint16 样本。最大块 248 样本。满缓冲停止，读取可见丢样。实板的触发延迟、连续吞吐和精度待测。
 
@@ -125,3 +125,9 @@ SYS operation 12 has an empty input and returns a u32 mask. Bit 0 indicates tagg
 - SYS 12 bit 4 adds I²C operation 8. Input is bus u8, job ID u32 and timeout ms u32. An idle master can release the open-drain lines, apply up to nine clocks and generate STOP once SDA is released. SCL must actually rise before moving on. The existing collect/cancel operations carry two result bytes (clock count and instantaneous SCL/SDA high bits), including partial data on timeout. GPIOs return to I²C mode when the operation ends.
 - SYS 12 bit 5 adds DIAG operation 2 for an active session. Input is minimum level u8 (0–2), limit u8 (1–16). Output starts with overwritten count u32 and record count u8 plus three zero bytes. Records are device time u32, request ID u32, status u16, level u8, event kind u8, service u8, opcode u8 and reserved u16. Kinds 1–6 record command errors, lease expiry, reset, suspend, open and stop. Logs contain no command payloads.
 - A stopped or failed SPI segment reports the RX DMA prefix already stored before abort. The SDK joins this prefix with earlier completed segments in the same transfer. These bytes describe RX progress, so external peripherals may already have observed more bus activity.
+
+### PWM channel selection
+
+SYS 12 bit 6 adds PWM operations 9–13 for configure, start, update, stop and get actual. Each request starts with the group u8 and hardware channel u8 (1 or 2), followed by the body from operations 1–5. Replies use the same layout. CH2 candidates are PA1 for TIM5 and PC7 for TIM3.
+
+Channels on one timer share PSC and ARR. Configure checks the quantized period against a configured sibling and returns busy on a mismatch. Update changes the group frequency and preserves the sibling's requested duty and polarity. Duty, polarity at start, pulse budget and deadline are per channel. Each pin is reserved separately, and the timer reservation is released after the last channel is released. Starting a channel on an active group prepares the first output for the next timer update event. The SDK reports the timer, channel and duty step in ppm, calculated as 1,000,000 / (ARR + 1).
