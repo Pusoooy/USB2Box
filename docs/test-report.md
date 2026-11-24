@@ -127,3 +127,16 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 | H00–H09 和 Windows 运行 | NOT_RUN / WAITING_HARDWARE | `make hil-verify` 缺实板和合法 VID/PID 返回 2。SPI 电气时序、TIM3 触发相位及持续 USB 吞吐待测 |
 
 默认 Debug 链接为 62,972 B Flash、33,252 B 静态 RAM，Release 为 49,844 B Flash、33,236 B 静态 RAM，另留 8 KiB 栈。Release 静态 RAM 比 0.1.1 低 200 B。0.1.2 Windows x64 候选 ZIP 的 SHA-256 为 `9abe7afc5f0550668feb89a2f78a73c95335cb8394a05dd627dbb855dd15aa8a`。[原始日志](evidence/m12-runtime-verify.log)
+
+## M12 0.1.3 SPI 超时和 USB 描述符
+
+| 验证 | 结果 | 覆盖 |
+|---|---|---|
+| SPI 超时回归 | HOST_MOCK_PASS | 在 `a6b817f` 上复现排队超时后片选和 DMA 仍占用。修复后覆盖启动前过期、时钟回绕、事务取消、保留 RX 前缀、回收两条 DMA Stream 和重新发起事务 |
+| `make -B -j4 verify-all` | exit 0 | ARM GCC 14.2.1、CPython 3.12、五外设 Host、协议、SDK、GUI offscreen 和 MCP stdio。SPI 与运行时另通过 UBSan |
+| ARM USB 描述符 | ARM_BUILD_PASS | 默认和 8、25 MHz HSE 候选共六个 Debug/Release 镜像。校验编译后的设备标识、双接口 Bulk、BOS、两份 WinUSB 兼容 ID/注册属性及独立 GUID |
+| 镜像反向验证 | PASS | 在临时副本上拒绝错误端点、BOS 长度、接口号、默认 VID 和重复 GUID 共五种变化 |
+| Windows x64 0.1.3 | Linux 静态校验通过 | 117 项 SHA-256、PE32+ 模拟器和 DLL、哈希锁定的 Windows 目标 wheel 解析及 ZIP 完整性。Linux 新虚拟环境的离线安装和 SPI 模拟通过 |
+| H00–H09 和 Windows 运行 | NOT_RUN / WAITING_HARDWARE | 无合法 VID/PID 与实板时 `make hil-verify` 返回 2。Windows 自动绑定、波形和吞吐等待实测 |
+
+默认 Debug 为 63,096 B Flash、33,252 B 静态 RAM，Release 为 49,944 B Flash、33,236 B 静态 RAM，另预留 8 KiB 栈。0.1.3 Windows ZIP 的 SHA-256 为 `d5b72544420aef3fa0fb688e4604147a7be339c1b662e42c058ba34420c806b6`。[原始日志](evidence/m12-spi-usb-verify.log)

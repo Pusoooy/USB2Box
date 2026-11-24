@@ -1,6 +1,6 @@
 # Agent Handoff / 项目交接
 
-**当前阶段为 M12。0.1.2 候选已通过云端软件回归，Windows 实机和 HIL 待验证。**
+**当前阶段为 M12。0.1.3 候选已通过云端软件回归，Windows 实机和 HIL 待验证。**
 
 ## 项目定位
 STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系统板，USB2IIC / UART / PWM / SPI / ADC；Windows GUI、Python SDK、Agent MCP Server。不要增加任何电阻、电容或芯片，允许短杜邦线自测。I2C仅内部弱上拉。
@@ -22,6 +22,7 @@ STM32F401RCT6（256KiB Flash / 64KiB SRAM）黑色 PCB Type-C 风格裸最小系
 - 第二轮集成实现了双 UART 数据推送、ADC/UART 复用、有界 I²C 从机 FIFO 和 PWM 运行中频率/占空比更新。新增功能可由 SYS 12 查询，原有帧布局兼容。ADC 扫描时间使用设备侧估算，I²C 支持显式总线恢复，SPI 保留 DMA 部分数据。Linux 已验证跨进程锁的占用和释放。实板时序、Windows 真机与吞吐数据仍待采集。[测试报告](test-report.md)
 - 0.1.1 基于 `4f13a34` 增加了 TIM5/PA1、TIM3/PC7 的 CH2 候选和组内共享频率管理。通过 Host 模拟重置、挂起、租约到期时关闭四个输出并释放资源。新增的 `adc-stream` 夹具记录实收速率、丢样和控制延迟。PWM 夹具测量更新前后的频率与占空比，两种夹具均已用 Mock 运行。[硬件候选与兼容性](adr/0005-pwm-channels-and-package.md)
 - 0.1.2 基于 `9e6ff99`，SPI 短事务走非阻塞中断，长事务按需占用原 DMA 路径，ADC 和 SPI 共用 33 个 256 B 块。Debug 加入 HAL/项目运行断言，Release 对坏结果做局部恢复并记录 I²C/SPI 作业故障。ADC 可由现有 TIM3 PWM timebase 触发，源停止时会报告结束。STM32 官方引脚与触发/DMA 表复核通过。[ADR](adr/0006-spi-buffer-pool-and-adc-trigger.md) · [原始日志](evidence/m12-runtime-verify.log)
+- 0.1.3 基于 `a6b817f`。SPI 排队作业到期会结束片选事务、回收 DMA 并保留已接收字节。原来的故障已在 Host Mock 复现。ARM 镜像门禁校验实际编译的 VID/PID、端点、BOS 和两份 WinUSB 接口记录，以及两接口 GUID 的唯一性。[原始日志](evidence/m12-spi-usb-verify.log)
 - 在 Python 3.12 下运行 `make -j2 verify-all`，用 `make package-windows` 重建候选。实板到位后核验 HSE、USB 走线、实际 GPIO 引出与合法 VID/PID，再执行 H00–H09，包括 SPI 中断/DMA 切换波形与 TIM3/ADC 相位。I²C 1 MHz 和扩展接口仍是条件目标。
 
 ## 历史交接

@@ -4,6 +4,8 @@ static bool selected, dma;
 static uint16_t result, received;
 static uint16_t fault_count, fault_status;
 
+bool spi_mock_selected(void) { return selected; }
+
 void spi_mock_fault(uint16_t count, uint16_t status)
 {
     fault_count = count;

@@ -23,7 +23,7 @@ void app_poll(uint32_t now)
     adc_poll();
     uart_poll();
     i2c_poll(now);
-    spi_poll(now);
+    spi_poll(&pool, now);
 }
 
 uint16_t app_command(uint8_t service, uint8_t opcode, const uint8_t *input,

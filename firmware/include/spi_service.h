@@ -13,7 +13,7 @@ typedef struct {
 
 uint16_t spi_command(resources *pool, uint8_t opcode, const uint8_t *input,
                      uint16_t length, uint8_t *out, uint16_t *written, uint32_t now);
-void spi_poll(uint32_t now);
+void spi_poll(resources *pool, uint32_t now);
 void spi_stop_all(resources *pool);
 
 uint32_t spi_driver_init(const spi_config *config);

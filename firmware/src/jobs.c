@@ -44,12 +44,17 @@ static bool lane_blocked(const jobs *queue, const job *candidate)
     return false;
 }
 
+static bool deadline_reached(const job *task, uint32_t now)
+{
+    return now - task->deadline < 0x80000000u;
+}
+
 void jobs_poll(jobs *queue, job_step step, uint32_t now)
 {
     for (unsigned n = 0; n < JOB_CAPACITY; ++n) {
         job *task = &queue->entries[(queue->next + n) % JOB_CAPACITY];
         if (task->state != QUEUED && task->state != RUNNING) continue;
-        if ((uint32_t)(now - task->deadline) < 0x80000000u) {
+        if (deadline_reached(task, now)) {
             if (task->state == RUNNING) step(task, true);
             task->status = STATUS_TIMEOUT;
         } else {
@@ -107,6 +112,16 @@ bool job_lane_active(const jobs *queue, uint8_t lane)
         const job *task = &queue->entries[i];
         if (task->lane == lane && (task->state == QUEUED || task->state == RUNNING))
             return true;
+    }
+    return false;
+}
+
+bool job_lane_expired(const jobs *queue, uint8_t lane, uint32_t now)
+{
+    for (unsigned i = 0; i < JOB_CAPACITY; ++i) {
+        const job *task = &queue->entries[i];
+        if (task->lane == lane && (task->state == QUEUED || task->state == RUNNING) &&
+            deadline_reached(task, now)) return true;
     }
     return false;
 }

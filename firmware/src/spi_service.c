@@ -52,12 +52,6 @@ static uint16_t advance(job *task, bool cancel)
     return STATUS_OK;
 }
 
-void spi_poll(uint32_t now)
-{
-    now_ms = now;
-    jobs_poll(&spi_jobs, advance, now);
-}
-
 static void release_dma(resources *pool)
 {
     if (!dma_reserved) return;
@@ -65,6 +59,15 @@ static void release_dma(resources *pool)
     resource_release_item(pool, SPI_OWNER, SPI_DMA_RX);
     resource_release_item(pool, SPI_OWNER, SPI_DMA_TX);
     dma_reserved = false;
+}
+
+void spi_poll(resources *pool, uint32_t now)
+{
+    now_ms = now;
+    /* An expired segment invalidates the whole CS interval, even before it starts. */
+    if (selected && job_lane_expired(&spi_jobs, 0, now)) abort_transaction();
+    jobs_poll(&spi_jobs, advance, now);
+    if (!selected) release_dma(pool);
 }
 
 void spi_stop_all(resources *pool)
@@ -184,7 +187,10 @@ uint16_t spi_command(resources *pool, uint8_t opcode, const uint8_t *input,
     case 8: {
         if (length != 5) return STATUS_VALUE;
         const uint16_t status = job_cancel(&spi_jobs, wire_u32(input + 1), advance);
-        if (status == STATUS_OK) abort_transaction();
+        if (status == STATUS_OK) {
+            abort_transaction();
+            release_dma(pool);
+        }
         return status;
     }
     default:

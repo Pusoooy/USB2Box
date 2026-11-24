@@ -89,7 +89,7 @@ offline-verify: verify-arm-deps
 	$(ARM_OBJCOPY) --version
 
 test-arm: debug release
-	$(PYTHON) tools/verify_arm_image.py $(ARM_NM) $(DEBUG_DIR)/usb2box.bin $(RELEASE_DIR)/usb2box.bin
+	$(PYTHON) tools/verify_arm_image.py --vid "$(USB_VID)" --pid "$(USB_PID)" $(ARM_NM) $(DEBUG_DIR)/usb2box.bin $(RELEASE_DIR)/usb2box.bin
 
 verify: offline-verify test-host test-arm
 

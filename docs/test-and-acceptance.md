@@ -20,11 +20,12 @@
 |---|---|---|
 | T-USB-001 | USB帧解析 | magic、版本、分片、多包粘连、长度溢出、非法offset、请求ID回绕 |
 | T-USB-002 | 会话与命令 | 心跳、排队、公平性、超时、取消、断线/恢复、安全停止 |
+| T-USB-003 | ARM 镜像 USB 描述符 | 编译后的 VID/PID、双接口、三个 Bulk 端点、BOS 和双 WinUSB 子集。Windows 枚举进入 H02 |
 | T-RES-001 | 资源锁 | GPIO/TIM/DMA重叠、合法DMA映射、不当抢占、申请失败回滚 |
 | T-I2C-001 | 模拟I²C | 双路Master/Slave、Repeated START、超时、Slave事件、弱上拉不作承诺 |
 | T-UART-001 | 模拟UART | 双路同时全双工、环形缓冲跨界、错误/溢出、随机字节流 |
 | T-PWM-001 | 计算与调度 | 频率与ARR/PSC计算、ppm量化、双独立TIM、有限脉冲、停止安全态 |
-| T-SPI-001 | 模拟SPI | Mode、8/16bit、多段CS不翻转、大分块、取消/超时、部分完成 |
+| T-SPI-001 | 模拟SPI | Mode、8/16bit、多段 CS、分块、取消和部分完成。排队超时关闭片选并释放 DMA，覆盖设备时钟回绕 |
 | T-ADC-001 | 模拟ADC | 采样序列、DMA半区事件、预/后触发、数据元信息、溢出停止 |
 | T-PC-001 | Python SDK/CLI | 请求应答、异步事件、异常类型、保存导出、设备发现Mock |
 | T-GUI-001 | Windows GUI | Mock设备各页基本功能、后台收流和线程安全、异常显示 |
