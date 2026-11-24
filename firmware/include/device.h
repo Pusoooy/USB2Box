@@ -19,6 +19,10 @@ enum {
     FEATURE_BULK_STREAMS = 1u << 0,
     FEATURE_I2C_EVENTS = 1u << 1,
     FEATURE_PWM_UPDATE = 1u << 2,
+    FEATURE_ADC_TIMING = 1u << 3,
+    FEATURE_I2C_RECOVERY = 1u << 4,
+    FEATURE_DIAGNOSTIC_LOG = 1u << 5,
+    DEVICE_LOG_CAPACITY = 16,
 };
 
 typedef uint16_t (*device_command)(uint8_t service, uint8_t opcode,
@@ -27,10 +31,19 @@ typedef uint16_t (*device_command)(uint8_t service, uint8_t opcode,
 typedef void (*device_stop)(void);
 
 typedef struct {
+    uint32_t tick, request;
+    uint16_t status;
+    uint8_t level, kind, service, opcode;
+} device_log_entry;
+
+typedef struct {
     device_command command;
     device_stop stop;
     uint32_t lease_id, lease_at, partial_at, last_request;
     uint32_t requests, invalid_headers, errors, lease_expired, resets;
+    uint32_t current_ms, overwritten;
+    device_log_entry log[DEVICE_LOG_CAPACITY];
+    uint8_t log_next, log_count;
     bool active, assembling;
     frame_header fragment, message;
     uint16_t header_used, payload_used, assembled, tx_size, tx_sent;
@@ -50,5 +63,6 @@ uint16_t wire_u16(const uint8_t *p);
 uint32_t wire_u32(const uint8_t *p);
 void wire_put16(uint8_t *p, uint16_t value);
 void wire_put32(uint8_t *p, uint32_t value);
+void wire_put64(uint8_t *p, uint64_t value);
 
 #endif

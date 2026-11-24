@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <stdio.h>
 
+void spi_mock_fault(uint16_t count, uint16_t status);
+
 int main(void)
 {
     resources pool;
@@ -35,7 +37,25 @@ int main(void)
         assert(spi_command(&pool, 8, request, 5, out, &written, now) == STATUS_OK);
         assert(spi_command(&pool, 7, request, 5, out, &written, now) == STATUS_OK);
         assert(wire_u16(out) == STATUS_CANCELLED);
+        const uint16_t faults[] = {STATUS_IO, JOB_PENDING, JOB_PENDING};
+        const uint16_t expected[] = {STATUS_IO, STATUS_TIMEOUT, STATUS_CANCELLED};
+        for (unsigned test = 0; test < 3; ++test) {
+            assert(spi_command(&pool, 2, request, 1, out, &written, now) == STATUS_OK);
+            wire_put32(request + 5, 20);
+            spi_mock_fault(12, faults[test]);
+            assert(spi_command(&pool, 3, request, sizeof request, out, &written, now) == STATUS_OK);
+            spi_poll(++now);
+            if (test == 2) {
+                assert(spi_command(&pool, 8, request, 5, out, &written, now) == STATUS_OK);
+            } else {
+                now += test == 1 ? 20 : 1;
+                spi_poll(now);
+            }
+            assert(spi_command(&pool, 7, request, 5, out, &written, now) == STATUS_OK);
+            assert(written == 16 && wire_u16(out) == expected[test] && wire_u16(out + 2) == 12);
+            for (unsigned i = 0; i < 12; ++i) assert(out[4 + i] == request[9 + i]);
+        }
         assert(spi_command(&pool, 5, request, 1, out, &written, now) == STATUS_OK);
     }
-    puts("SPI modes, 8/16 bit, held CS, chunked DMA mock and cancel passed");
+    puts("SPI modes, held CS and partial DMA results on fault, timeout and cancellation passed");
 }

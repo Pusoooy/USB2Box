@@ -50,7 +50,7 @@ void usb_link_poll(uint32_t now)
     } else if (events & BUS_SUSPEND) {
         device_suspend(link_device);
         received = consumed = 0;
-        tud_vendor_n_read_flush(0);
+        if (tud_mounted()) tud_vendor_n_read_flush(0);
     }
     if (!tud_mounted() || tud_suspended()) return;
     if (consumed == received) {

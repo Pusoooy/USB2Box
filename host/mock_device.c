@@ -88,6 +88,7 @@ int main(int argc, char **argv)
             previous = now;
             device_tick(&dev, now);
             pwm_mock_tick(now);
+            adc_mock_tick(now);
             app_poll(now);
         }
         size_t consumed = 0;

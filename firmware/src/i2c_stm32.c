@@ -59,7 +59,10 @@ bool i2c_driver_init(unsigned bus, uint32_t speed, bool slave, uint8_t address)
         .ClockSpeed = speed, .DutyCycle = I2C_DUTYCYCLE_2,
         .OwnAddress1 = (uint32_t)address << 1, .AddressingMode = I2C_ADDRESSINGMODE_7BIT,
     };
-    if (HAL_I2C_Init(&hw->handle) != HAL_OK) return false;
+    if (HAL_I2C_Init(&hw->handle) != HAL_OK) {
+        i2c_driver_deinit(bus);
+        return false;
+    }
     GPIO_InitTypeDef pin = {
         .Pin = bus == 0 ? pins(bus) : GPIO_PIN_10,
         .Mode = GPIO_MODE_AF_OD, .Pull = GPIO_PULLUP,
@@ -91,6 +94,33 @@ void i2c_driver_deinit(unsigned bus)
     HAL_I2C_DeInit(&hardware[bus].handle);
     reset_peripheral(bus);
     HAL_GPIO_DeInit(GPIOB, pins(bus));
+}
+
+void i2c_driver_recovery_begin(unsigned bus)
+{
+    i2c_driver_deinit(bus);
+    /* Set the output latches high before selecting open-drain GPIO. */
+    GPIOB->BSRR = pins(bus);
+    GPIO_InitTypeDef output = {
+        .Pin = pins(bus), .Mode = GPIO_MODE_OUTPUT_OD, .Pull = GPIO_PULLUP,
+        .Speed = GPIO_SPEED_FREQ_LOW,
+    };
+    HAL_GPIO_Init(GPIOB, &output);
+}
+
+void i2c_driver_recovery_drive(unsigned bus, bool release_scl, bool release_sda)
+{
+    const uint32_t scl = bus == 0 ? GPIO_PIN_8 : GPIO_PIN_10;
+    const uint32_t sda = bus == 0 ? GPIO_PIN_9 : GPIO_PIN_3;
+    GPIOB->BSRR = (release_scl ? scl : scl << 16) | (release_sda ? sda : sda << 16);
+}
+
+uint8_t i2c_driver_lines(unsigned bus)
+{
+    const uint32_t scl = bus == 0 ? GPIO_PIN_8 : GPIO_PIN_10;
+    const uint32_t sda = bus == 0 ? GPIO_PIN_9 : GPIO_PIN_3;
+    const uint32_t input = GPIOB->IDR;
+    return (uint8_t)((input & scl ? I2C_LINE_SCL : 0) | (input & sda ? I2C_LINE_SDA : 0));
 }
 
 bool i2c_driver_start(unsigned bus, uint8_t address, bool read, uint8_t *buffer,

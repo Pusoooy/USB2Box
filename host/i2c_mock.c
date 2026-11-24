@@ -8,6 +8,16 @@ typedef struct {
 
 static mock_bus mock[2];
 static uint32_t bus_time;
+static struct {
+    unsigned release_after, pulses;
+    bool stuck_clock, scl, sda;
+} lines[2];
+
+void i2c_mock_stuck(unsigned bus, unsigned release_after, bool stuck_clock)
+{
+    lines[bus].release_after = release_after;
+    lines[bus].stuck_clock = stuck_clock;
+}
 
 bool i2c_driver_init(unsigned bus, uint32_t speed, bool slave, uint8_t address)
 {
@@ -43,3 +53,23 @@ void i2c_driver_slave_tx(unsigned bus, const uint8_t *data, uint8_t length)
     for (unsigned i = 0; i < I2C_SLAVE_BYTES; ++i) mock[bus].tx[i] = i < length ? data[i] : 0xff;
 }
 void i2c_driver_service(unsigned bus) { (void)bus; }
+
+void i2c_driver_recovery_begin(unsigned bus)
+{
+    lines[bus].pulses = 0;
+    lines[bus].scl = lines[bus].sda = true;
+}
+
+void i2c_driver_recovery_drive(unsigned bus, bool release_scl, bool release_sda)
+{
+    if (!lines[bus].scl && release_scl && release_sda && !lines[bus].stuck_clock)
+        ++lines[bus].pulses;
+    lines[bus].scl = release_scl;
+    lines[bus].sda = release_sda;
+}
+
+uint8_t i2c_driver_lines(unsigned bus)
+{
+    return (uint8_t)((lines[bus].scl && !lines[bus].stuck_clock ? I2C_LINE_SCL : 0) |
+                     (lines[bus].sda && lines[bus].pulses >= lines[bus].release_after ? I2C_LINE_SDA : 0));
+}

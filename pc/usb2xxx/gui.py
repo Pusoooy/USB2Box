@@ -4,7 +4,7 @@ from __future__ import annotations
 from argparse import ArgumentParser
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 from threading import Event, Lock
@@ -253,6 +253,7 @@ class Workbench(QMainWindow):
             "capabilities": dev.capabilities(), "protocol": dev.diagnostics()})
         self._action(page, "Resource owners", lambda dev, _: {
             index: owner for index, owner in enumerate(dev.resources()) if owner})
+        self._action(page, "Device log", lambda dev, _: dev.diagnostic_log())
         page.button("Export log", self._export_log)
         page.button("Run Host regression", lambda: self.submit(
             lambda _: subprocess.run(["make", "test-host"], check=False, capture_output=True,
@@ -280,6 +281,7 @@ class Workbench(QMainWindow):
         self._action(page, "Set reply", lambda d, v: d.i2c_slave_buffer(int(v["bus"]), bytes.fromhex(v["reply"])))
         self._action(page, "Read event", lambda d, v: self._i2c_event(d, int(v["bus"])))
         self._action(page, "Release", lambda d, v: d.i2c_release(int(v["bus"])))
+        self._action(page, "Recover idle bus", lambda d, v: d.i2c_recover(int(v["bus"])))
         page.layout.addWidget(QLabel("Internal pull-ups are weak. Start with short jumpers and low speed."))
         page.layout.addStretch()
 
@@ -467,6 +469,7 @@ class Workbench(QMainWindow):
             int(v["hz"]), int(v["count"]), int(v["pre"]), int(v["post"])), self._capture_started)
         self._action(page, "Trigger", lambda d, _: d.adc_trigger())
         self._action(page, "Watchdog", lambda d, v: d.adc_watchdog(*map(int, v["watchdog"].split(":"))))
+        self._action(page, "Estimate Vref", lambda d, _: {"reference_volts": d.adc_estimate_reference()})
         self._action(page, "Stop", lambda d, _: d.adc_stop(), lambda _: setattr(self, "capturing", False))
         page.button("Export samples", self._export_adc)
         self.adc_status = QLabel("Idle")
@@ -503,6 +506,8 @@ class Workbench(QMainWindow):
     def _on_adc(self, blocks):
         for block in blocks:
             if block.samples:
+                if self.last_block and block.offset != (self.last_block.offset + len(self.last_block.samples)) % (1 << 32):
+                    self.plot.values.clear()
                 self.last_block = block
                 self.plot.add(block)
         block = blocks[-1]
@@ -518,8 +523,11 @@ class Workbench(QMainWindow):
         if filename:
             last = self.last_block
             values = tuple(self.plot.values)
-            block = ADCBlock(**{**asdict(last), "samples": values,
-                                "offset": last.offset + len(last.samples) - len(values)})
+            delta = len(last.samples) - len(values)
+            block = replace(last, samples=values, offset=(last.offset + delta) % (1 << 32))
+            if last.first_device_us is not None:
+                rank, timestamp = last.sample_position(delta)
+                block = replace(block, first_rank=rank, first_device_us=timestamp)
             self.submit(lambda _: block.save(filename), require_device=False)
 
 

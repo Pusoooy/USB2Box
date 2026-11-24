@@ -136,6 +136,23 @@ def discover(vid: int, pid: int):
         raise Disconnected("USB device enumeration failed") from error
 
 
+def acquire_device_lock(path: Path):
+    """Hold a nonblocking per-device lock until the returned file is closed."""
+    lock = path.open("a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as error:
+        lock.close()
+        raise Busy(0x2001) from error
+    return lock
+
+
 class BulkTransport(Transport):
     def __init__(self, vid: int, pid: int, serial: str | None = None):
         import usb.core
@@ -150,9 +167,9 @@ class BulkTransport(Transport):
         self._device = candidates[0]
         identity = serial or self._device.serial_number
         key = hashlib.sha256(f"{vid}:{pid}:{identity}".encode()).hexdigest()[:24]
-        self._lock = open(Path(tempfile.gettempdir()) / f"usb2xxx-{key}.lock", "a+b")
+        self._lock = None
         try:
-            self._acquire()
+            self._lock = acquire_device_lock(Path(tempfile.gettempdir()) / f"usb2xxx-{key}.lock")
             try:
                 self._device.get_active_configuration()
             except usb.core.USBError:
@@ -163,18 +180,6 @@ class BulkTransport(Transport):
             self.close()
             raise
         self._buffers = {0x81: bytearray(), 0x82: bytearray()}
-
-    def _acquire(self) -> None:
-        try:
-            if os.name == "nt":
-                import msvcrt
-                self._lock.seek(0)
-                msvcrt.locking(self._lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            raise Busy(0x2001) from error
 
     def _io(self, method, *args, timeout: float):
         try:
@@ -204,4 +209,5 @@ class BulkTransport(Transport):
         try:
             self._util.dispose_resources(self._device)
         finally:
-            self._lock.close()
+            if self._lock is not None:
+                self._lock.close()

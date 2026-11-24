@@ -23,6 +23,9 @@ SYS, I2C, UART, PWM, SPI, ADC = 0, 1, 2, 3, 4, 5
 FEATURE_BULK_STREAMS = 1 << 0
 FEATURE_I2C_EVENTS = 1 << 1
 FEATURE_PWM_UPDATE = 1 << 2
+FEATURE_ADC_TIMING = 1 << 3
+FEATURE_I2C_RECOVERY = 1 << 4
+FEATURE_DIAGNOSTIC_LOG = 1 << 5
 
 
 @dataclass(frozen=True)
@@ -71,24 +74,64 @@ class ADCBlock:
     more_available: bool
     threshold_seen: bool
     samples: tuple[int, ...]
+    first_device_us: int | None = None
+    scan_period_ns: int = 0
+    first_rank: int = 0
+    scan_channels: tuple[int, ...] = ()
+    rank_offsets_ns: tuple[int, ...] = ()
 
     @classmethod
-    def decode(cls, raw: bytes) -> ADCBlock:
+    def decode(cls, raw: bytes, *, timed: bool = False) -> ADCBlock:
+        metadata = {}
+        if timed:
+            if len(raw) < 18:
+                raise ProtocolError("short ADC timing header")
+            _, first_us, scan_ns, ranks, rank = struct.unpack_from("<IQIBB", raw)
+            prefix = 18 + ranks * 5
+            if not 1 <= ranks <= 8 or rank >= ranks or len(raw) < prefix:
+                raise ProtocolError("invalid ADC scan ranks")
+            sequence = tuple(struct.iter_unpack("<BI", raw[18:prefix]))
+            if any(channel > 18 for channel, _ in sequence):
+                raise ProtocolError("invalid ADC scan channel")
+            metadata = dict(first_device_us=first_us, scan_period_ns=scan_ns, first_rank=rank,
+                            scan_channels=tuple(channel for channel, _ in sequence),
+                            rank_offsets_ns=tuple(delay for _, delay in sequence))
+            raw = raw[prefix:]
         if len(raw) < 16:
             raise ProtocolError("short ADC metadata")
         rate, offset, dropped, count, bits, flags = struct.unpack_from("<IIIHBB", raw)
-        if len(raw) != 16 + count * 2:
+        if len(raw) != 16 + count * 2 or bits not in (6, 8, 10, 12):
             raise ProtocolError("ADC metadata does not match samples")
         return cls(rate, offset, dropped, bits, bool(flags & 1), bool(flags & 2), bool(flags & 4), bool(flags & 8),
-                   struct.unpack_from(f"<{count}H", raw, 16))
+                   struct.unpack_from(f"<{count}H", raw, 16), **metadata)
+
+    def sample_position(self, index: int) -> tuple[int, int]:
+        """Return the scan rank and estimated device time in µs."""
+        if self.first_device_us is None or not self.scan_channels:
+            raise ValueError("this ADC block has no timing metadata")
+        scans, rank = divmod(self.first_rank + index, len(self.scan_channels))
+        delta = scans * self.scan_period_ns + self.rank_offsets_ns[rank] - self.rank_offsets_ns[self.first_rank]
+        return rank, self.first_device_us + delta // 1000
+
+    def volts(self, reference_v: float) -> tuple[float, ...]:
+        if not 0 < reference_v <= 5:
+            raise ValueError("reference voltage must be greater than zero and at most 5 V")
+        full_scale = (1 << self.resolution) - 1
+        return tuple(sample * reference_v / full_scale for sample in self.samples)
 
     def save(self, filename: str | Path) -> None:
         path = Path(filename)
         if path.suffix.lower() == ".csv":
             with path.open("w", newline="", encoding="utf-8") as file:
                 writer = csv.writer(file)
-                writer.writerow(("sample_index", "raw"))
-                writer.writerows(enumerate(self.samples, self.offset))
+                if self.first_device_us is None:
+                    writer.writerow(("sample_index", "raw"))
+                    writer.writerows(enumerate(self.samples, self.offset))
+                else:
+                    writer.writerow(("sample_index", "channel", "device_us_estimated", "raw"))
+                    for index, sample in enumerate(self.samples):
+                        rank, timestamp = self.sample_position(index)
+                        writer.writerow((self.offset + index, self.scan_channels[rank], timestamp, sample))
         elif path.suffix.lower() == ".npy":
             import numpy
             numpy.save(path, numpy.asarray(self.samples, dtype="<u2"), allow_pickle=False)
@@ -260,6 +303,17 @@ class USB2XXX:
         return dict(zip(("requests", "invalid_headers", "errors", "lease_expired", "resets"),
                         values, strict=True))
 
+    def diagnostic_log(self, limit: int = 16, minimum_level: int = 0) -> dict:
+        raw = self.call(6, 2, bytes((minimum_level, limit)))
+        if len(raw) < 8 or len(raw) != 8 + raw[4] * 16:
+            raise ProtocolError("invalid diagnostic log")
+        fields = ("device_ms", "request_id", "status", "level", "kind", "service", "opcode")
+        return {
+            "overwritten": U32.unpack_from(raw)[0],
+            "entries": [dict(zip(fields, record[:7], strict=True))
+                        for record in struct.iter_unpack("<IIHBBBBH", raw[8:])],
+        }
+
     def resources(self) -> list[int]:
         return list(self.call(SYS, 8))
 
@@ -371,6 +425,14 @@ class USB2XXX:
     def i2c_release(self, bus: int) -> None:
         self.call(I2C, 6, bytes((bus,)))
 
+    def i2c_recover(self, bus: int, timeout_ms: int = 100) -> dict:
+        job = self._new_job()
+        self.call(I2C, 8, struct.pack("<BII", bus, job, timeout_ms))
+        raw = self._collect(SYS, 11, U32.pack(job), timeout_ms, 9)
+        if len(raw) != 2:
+            raise ProtocolError("invalid I²C recovery result")
+        return {"pulses": raw[0], "scl_high": bool(raw[1] & 1), "sda_high": bool(raw[1] & 2)}
+
     def pwm_configure(self, group: int, frequency_hz: int, duty_ppm: int,
                       invert: bool = False) -> dict:
         raw = self.call(PWM, 1, struct.pack("<BIIB", group, frequency_hz, duty_ppm, invert))
@@ -426,15 +488,25 @@ class USB2XXX:
                     for offset in range(0, len(segment), 256):
                         job = self._new_job()
                         token = b"\0" + U32.pack(job)
-                        self.call(SPI, 3, token + U32.pack(timeout_ms) + segment[offset:offset + 256])
-                        pieces.append(self._collect(SPI, 7, token, timeout_ms, 8))
+                        try:
+                            self.call(SPI, 3, token + U32.pack(timeout_ms) + segment[offset:offset + 256])
+                            pieces.append(self._collect(SPI, 7, token, timeout_ms, 8))
+                        except RemoteError as error:
+                            error.partial = b"".join([*result, *pieces, error.partial])
+                            raise
                     result.append(b"".join(pieces))
                 if hold_us:
                     sleep((hold_us + 999) // 1000 / 1000 + 0.002)
                 self.call(SPI, 4, b"\0")
-                return result
-            finally:
+            except BaseException:
+                try:
+                    self.call(SPI, 5, b"\0")
+                except DeviceError:
+                    pass
+                raise
+            else:
                 self.call(SPI, 5, b"\0")
+                return result
 
     def adc_configure(self, channels: list[tuple[int, int]], resolution: int = 12) -> None:
         self.call(ADC, 1, bytes((resolution, len(channels))) + b"".join(map(bytes, channels)))
@@ -452,6 +524,16 @@ class USB2XXX:
 
     def adc_read(self, limit: int = 248) -> ADCBlock:
         return ADCBlock.decode(self.call(ADC, 6, U16.pack(limit)))
+
+    def adc_read_timed(self, limit: int = 219) -> ADCBlock:
+        return ADCBlock.decode(self.call(ADC, 11, U16.pack(limit)), timed=True)
+
+    def adc_estimate_reference(self) -> float:
+        code, millivolts = struct.unpack("<HH", self.call(ADC, 12))
+        measured = self.adc_read_once(17)
+        if not measured:
+            raise ProtocolError("zero VREFINT reading")
+        return millivolts * code / (1000 * measured)
 
     def adc_stop(self) -> None:
         with self._adc_lock:
@@ -482,12 +564,16 @@ class USB2XXX:
 
     def adc_next_stream(self, timeout: float = 0.8) -> ADCBlock:
         with self._adc_lock:
-            if self.features() & FEATURE_BULK_STREAMS:
+            features = self.features()
+            if features & FEATURE_BULK_STREAMS:
+                timed = bool(features & FEATURE_ADC_TIMING)
+                operation = 10 if timed else 9
                 if self._adc_stream is None:
                     self._adc_stream = self._bulk_reader().subscribe(
-                        (ADC, 9, 1), lambda tag: self.call(ADC, 9, struct.pack("<IH", tag, 1)))
+                        (ADC, operation, 1),
+                        lambda tag: self.call(ADC, operation, struct.pack("<IH", tag, 1)))
                 frame = self._adc_stream.read(timeout)
-                return ADCBlock.decode(frame.payload[4:])
+                return ADCBlock.decode(frame.payload if timed else frame.payload[4:], timed=timed)
             if self.simulated:
                 block = self.adc_read()
                 if not block.samples:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import logging
 from threading import RLock
 from time import monotonic, sleep
@@ -14,6 +14,7 @@ from pydantic import Field
 
 from . import ADCBlock, Busy, Deadline, DeviceError, I2CMessage, RemoteError, USB2XXX, list_devices
 from .cli import connection_args, settings
+from .client import FEATURE_DIAGNOSTIC_LOG
 
 log = logging.getLogger("usb2xxx.mcp")
 Port = Annotated[int, Field(ge=0, le=1)]
@@ -169,6 +170,17 @@ def create_server(adapter: Adapter) -> FastMCP:
         return adapter.use(lambda dev: dev.i2c_release(bus_id))
 
     @server.tool()
+    def usb2xxx_i2c_recover(bus_id: Port, confirm: bool = False) -> dict:
+        """Attempt open-drain bus recovery on an idle I2C controller."""
+        def recover(dev):
+            dev.i2c_configure(bus_id, 10000)
+            try:
+                return dev.i2c_recover(bus_id)
+            finally:
+                dev.i2c_release(bus_id)
+        return adapter.use(recover, mutating=True, confirm=confirm)
+
+    @server.tool()
     def usb2xxx_uart_configure(
         uart_id: Port, baud: Annotated[int, Field(ge=1200, le=1000000)] = 115200,
         parity: Annotated[int, Field(ge=0, le=2)] = 0,
@@ -252,28 +264,38 @@ def create_server(adapter: Adapter) -> FastMCP:
         """Perform a bounded capture and return a local in-memory capture ID."""
         def capture(dev):
             data: list[int] = []
+            first = None
             dev.adc_configure([(channel, 7 if channel >= 16 else 2)])
             try:
                 dev.adc_start(sample_rate, samples)
                 until = monotonic() + samples / sample_rate + 1.0
                 while True:
-                    block = dev.adc_read()
+                    if monotonic() >= until:
+                        raise Deadline("capture completion deadline")
+                    try:
+                        block = dev.adc_next_stream(0.1)
+                    except Deadline:
+                        continue
+                    if first is None and block.samples:
+                        first = block
                     data.extend(block.samples)
                     if not block.running and not block.more_available:
                         break
-                    if monotonic() >= until:
-                        raise Deadline("capture completion deadline")
-                    sleep(0.005)
+                    if not block.samples:
+                        sleep(0.005)
             finally:
                 dev.adc_stop()
-            completed = ADCBlock(block.rate, 0, block.dropped, block.resolution, False, False, False, block.threshold_seen, tuple(data))
+            completed = replace(first or block, dropped=block.dropped, running=False, awaiting_trigger=False,
+                                more_available=False, threshold_seen=block.threshold_seen, samples=tuple(data))
             adapter.next_capture += 1
             capture_id = adapter.next_capture
             adapter.captures[capture_id] = completed
             while len(adapter.captures) > 3:
                 adapter.captures.popitem(last=False)
             return {"capture_id": capture_id, "total": len(data),
-                    "sample_rate": completed.rate, "dropped": completed.dropped}
+                    "sample_rate": completed.rate, "dropped": completed.dropped,
+                    "first_device_us_estimated": completed.first_device_us,
+                    "scan_channels": completed.scan_channels}
         return adapter.use(capture, mutating=True, confirm=confirm)
 
     @server.tool()
@@ -294,6 +316,7 @@ def create_server(adapter: Adapter) -> FastMCP:
         return adapter.use(lambda dev: {
             "owners": dev.resources(),
             "protocol_counters": dev.diagnostics(),
+            "device_log": dev.diagnostic_log() if dev.features() & FEATURE_DIAGNOSTIC_LOG else None,
             "captures": {str(key): {name: value for name, value in asdict(block).items()
                                    if name != "samples"} for key, block in adapter.captures.items()},
         })

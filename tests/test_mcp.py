@@ -44,9 +44,24 @@ class MCPTests(unittest.TestCase):
                     started = outcome(await session.call_tool("usb2xxx_pwm_start", {
                         "group": 0, "duration_ms": 100, "arm": True, "confirm": True}))
                     self.assertTrue(started["actual_values"]["running"])
+                    updated = outcome(await session.call_tool("usb2xxx_pwm_update", {
+                        "group": 0, "frequency_hz": 1200, "duty_ppm": 350000, "confirm": True}))
+                    self.assertEqual(updated["status"], "ok")
+                    slave = outcome(await session.call_tool("usb2xxx_i2c_slave_configure", {
+                        "bus_id": 1, "address": 42, "reply_hex": "aabb", "confirm": True}))
+                    self.assertEqual(slave["status"], "ok")
+                    transfer = outcome(await session.call_tool("usb2xxx_i2c_transfer", {
+                        "bus_id": 0, "address": 42, "messages": [{"hex": "17"}, {"read": 2}],
+                        "confirm": True}))
+                    self.assertEqual(transfer["actual_values"]["hex"], "aabb")
+                    events = outcome(await session.call_tool("usb2xxx_i2c_slave_events", {"bus_id": 1}))
+                    self.assertEqual([item["kind"] for item in events["actual_values"]["events"]], ["rx", "tx"])
+                    denied_recovery = outcome(await session.call_tool("usb2xxx_i2c_recover", {"bus_id": 0}))
+                    self.assertEqual(denied_recovery["status"], "permission_denied")
                     capture = outcome(await session.call_tool("usb2xxx_adc_capture", {
                         "channel": 10, "samples": 32, "confirm": True}))
                     self.assertEqual(capture["actual_values"]["total"], 32)
+                    self.assertIsNotNone(capture["actual_values"]["first_device_us_estimated"])
                     capture_id = capture["actual_values"]["capture_id"]
                     chunk = outcome(await session.call_tool("usb2xxx_read_capture_chunk",
                                                             {"capture_id": capture_id, "count": 8}))

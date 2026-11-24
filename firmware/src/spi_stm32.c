@@ -7,6 +7,7 @@ static GPIO_TypeDef *cs_gpio;
 static uint16_t cs_pin;
 static bool active_high, wide;
 static volatile uint16_t transfer_status;
+static uint16_t transfer_bytes;
 
 void spi_driver_select(bool active)
 {
@@ -96,10 +97,19 @@ void spi_driver_deinit(void)
 
 bool spi_driver_start(uint8_t *tx, uint8_t *rx, uint16_t bytes)
 {
+    transfer_bytes = bytes;
     transfer_status = JOB_PENDING;
     return HAL_SPI_TransmitReceive_DMA(&spi, tx, rx, wide ? bytes / 2 : bytes) == HAL_OK;
 }
 uint16_t spi_driver_result(void) { return transfer_status; }
+
+uint16_t spi_driver_received(void)
+{
+    const uint32_t remaining = __HAL_DMA_GET_COUNTER(&receive) * (wide ? 2u : 1u);
+    __DMB();
+    return remaining > transfer_bytes ? 0 : (uint16_t)(transfer_bytes - remaining);
+}
+
 void spi_driver_abort(void) { HAL_SPI_Abort(&spi); }
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *handle)

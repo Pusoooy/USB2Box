@@ -19,6 +19,7 @@ void spi_driver_deinit(void);
 void spi_driver_select(bool active);
 bool spi_driver_start(uint8_t *tx, uint8_t *rx, uint16_t bytes);
 uint16_t spi_driver_result(void);
+uint16_t spi_driver_received(void);
 void spi_driver_abort(void);
 
 #endif

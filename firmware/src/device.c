@@ -22,6 +22,32 @@ void wire_put32(uint8_t *p, uint32_t value)
     wire_put16(p + 2, (uint16_t)(value >> 16));
 }
 
+void wire_put64(uint8_t *p, uint64_t value)
+{
+    wire_put32(p, (uint32_t)value);
+    wire_put32(p + 4, (uint32_t)(value >> 32));
+}
+
+enum {
+    LOG_REQUEST_ERROR = 1, LOG_LEASE_EXPIRED, LOG_RESET, LOG_SUSPEND,
+    LOG_OPEN, LOG_STOP,
+};
+
+static void record(device *dev, uint8_t kind, uint8_t level, uint16_t status,
+                   const frame_header *request)
+{
+    device_log_entry *entry = &dev->log[dev->log_next];
+    *entry = (device_log_entry){
+        .tick = dev->current_ms, .status = status, .level = level, .kind = kind,
+        .request = request ? request->request_id : 0,
+        .service = request ? request->service : SERVICE_SYS,
+        .opcode = request ? request->opcode : 0,
+    };
+    dev->log_next = (uint8_t)((dev->log_next + 1u) % DEVICE_LOG_CAPACITY);
+    if (dev->log_count == DEVICE_LOG_CAPACITY) ++dev->overwritten;
+    else ++dev->log_count;
+}
+
 static void reset_rx(device *dev)
 {
     dev->header_used = 0;
@@ -37,6 +63,7 @@ void device_init(device *dev, device_command command, device_stop stop)
     dev->active = false;
     dev->lease_id = 0;
     dev->requests = dev->invalid_headers = dev->errors = dev->lease_expired = dev->resets = 0;
+    dev->current_ms = dev->overwritten = dev->log_count = dev->log_next = 0;
     device_reset(dev);
 }
 
@@ -48,25 +75,34 @@ static void stop_session(device *dev)
     }
 }
 
-void device_reset(device *dev)
-{
-    ++dev->resets;
-    device_suspend(dev);
-    dev->tx_size = 0;
-    dev->tx_sent = 0;
-}
-
-void device_suspend(device *dev)
+static void end_link_session(device *dev)
 {
     stop_session(dev);
     reset_rx(dev);
     dev->last_request = 0;
 }
 
+void device_reset(device *dev)
+{
+    ++dev->resets;
+    record(dev, LOG_RESET, 0, STATUS_OK, 0);
+    end_link_session(dev);
+    dev->tx_size = 0;
+    dev->tx_sent = 0;
+}
+
+void device_suspend(device *dev)
+{
+    record(dev, LOG_SUSPEND, 0, STATUS_OK, 0);
+    end_link_session(dev);
+}
+
 void device_tick(device *dev, uint32_t now)
 {
+    dev->current_ms = now;
     if (dev->active && now - dev->lease_at >= DEVICE_LEASE_MS) {
         ++dev->lease_expired;
+        record(dev, LOG_LEASE_EXPIRED, 1, STATUS_SESSION, 0);
         stop_session(dev);
         reset_rx(dev);
     }
@@ -96,7 +132,9 @@ static uint16_t system_command(device *dev, uint16_t length, uint8_t *out,
         return STATUS_OK;
     case SYS_FEATURES:
         if (length) return STATUS_VALUE;
-        wire_put32(out, FEATURE_BULK_STREAMS | FEATURE_I2C_EVENTS | FEATURE_PWM_UPDATE);
+        wire_put32(out, FEATURE_BULK_STREAMS | FEATURE_I2C_EVENTS |
+                        FEATURE_PWM_UPDATE | FEATURE_ADC_TIMING | FEATURE_I2C_RECOVERY |
+                        FEATURE_DIAGNOSTIC_LOG);
         *written = 4;
         return STATUS_OK;
     case SYS_DEVICE_INFO:
@@ -110,6 +148,7 @@ static uint16_t system_command(device *dev, uint16_t length, uint8_t *out,
         if (++dev->lease_id == 0) ++dev->lease_id;
         dev->active = true;
         dev->lease_at = now;
+        record(dev, LOG_OPEN, 0, STATUS_OK, &dev->message);
         wire_put32(out, dev->lease_id);
         *written = 4;
         return STATUS_OK;
@@ -117,11 +156,14 @@ static uint16_t system_command(device *dev, uint16_t length, uint8_t *out,
     case SYS_CLOSE:
         if (!dev->active || length != 4 || wire_u32(dev->input) != dev->lease_id)
             return STATUS_SESSION;
-        if (dev->message.opcode == SYS_CLOSE) stop_session(dev);
-        else dev->lease_at = now;
+        if (dev->message.opcode == SYS_CLOSE) {
+            record(dev, LOG_STOP, 0, STATUS_OK, &dev->message);
+            stop_session(dev);
+        } else dev->lease_at = now;
         return STATUS_OK;
     case SYS_STOP:
         if (length) return STATUS_VALUE;
+        record(dev, LOG_STOP, 0, STATUS_OK, &dev->message);
         stop_session(dev);
         return STATUS_OK;
     case SYS_CANCEL:
@@ -145,6 +187,7 @@ static void enqueue_reply(device *dev, const frame_header *request,
     if (status != STATUS_OK || written > DEVICE_FRAGMENT) {
         if (status == STATUS_OK) status = STATUS_FULL;
         ++dev->errors;
+        record(dev, LOG_REQUEST_ERROR, status == STATUS_IO ? 2 : 1, status, request);
         reply.flags |= FLAG_ERROR;
         uint8_t *error = dev->tx + FRAME_HEADER_SIZE;
         const uint8_t resource = status == STATUS_BUSY && written == 1 ? error[0] : 0xff;
@@ -162,6 +205,36 @@ static void enqueue_reply(device *dev, const frame_header *request,
     frame_encode(dev->tx, &reply);
     dev->tx_size = FRAME_HEADER_SIZE + written;
     dev->tx_sent = 0;
+}
+
+static uint16_t read_log(const device *dev, uint8_t level, uint8_t limit, uint8_t *out)
+{
+    uint8_t count = 0;
+    /* Include the newest matching records and put them in chronological order. */
+    unsigned span = 0;
+    while (span < dev->log_count && count < limit) {
+        const unsigned index = (dev->log_next + DEVICE_LOG_CAPACITY - 1u - span++) % DEVICE_LOG_CAPACITY;
+        if (dev->log[index].level >= level) ++count;
+    }
+    wire_put32(out, dev->overwritten);
+    out[4] = count;
+    out[5] = out[6] = out[7] = 0;
+    uint16_t length = 8;
+    while (span) {
+        const unsigned index = (dev->log_next + DEVICE_LOG_CAPACITY - span--) % DEVICE_LOG_CAPACITY;
+        const device_log_entry *entry = &dev->log[index];
+        if (entry->level < level) continue;
+        wire_put32(out + length, entry->tick);
+        wire_put32(out + length + 4, entry->request);
+        wire_put16(out + length + 8, entry->status);
+        out[length + 10] = entry->level;
+        out[length + 11] = entry->kind;
+        out[length + 12] = entry->service;
+        out[length + 13] = entry->opcode;
+        wire_put16(out + length + 14, 0);
+        length += 16;
+    }
+    return length;
 }
 
 static void dispatch(device *dev, uint32_t now)
@@ -184,6 +257,14 @@ static void dispatch(device *dev, uint32_t now)
             wire_put32(out + 16, dev->resets);
             written = 20;
             status = STATUS_OK;
+        } else if (dev->active && dev->message.service == SERVICE_DIAG && dev->message.opcode == 2) {
+            if (dev->assembled != 2 || dev->input[0] > 2 ||
+                !dev->input[1] || dev->input[1] > DEVICE_LOG_CAPACITY) {
+                status = STATUS_VALUE;
+            } else {
+                written = read_log(dev, dev->input[0], dev->input[1], out);
+                status = STATUS_OK;
+            }
         } else if (dev->active) {
             status = dev->command ? dev->command(dev->message.service, dev->message.opcode,
                      dev->input, dev->assembled, out, &written, now) : STATUS_OPCODE;

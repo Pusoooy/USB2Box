@@ -1,5 +1,6 @@
 #include "adc_service.h"
 #include "stm32f4xx_hal.h"
+#include "stm32f4xx_ll_adc.h"
 
 static uint16_t dma_samples[2 * ADC_BLOCK];
 static ADC_HandleTypeDef adc;
@@ -15,7 +16,6 @@ static const uint32_t sample_time[] = {
     ADC_SAMPLETIME_56CYCLES, ADC_SAMPLETIME_84CYCLES, ADC_SAMPLETIME_112CYCLES,
     ADC_SAMPLETIME_144CYCLES, ADC_SAMPLETIME_480CYCLES,
 };
-static const uint16_t sample_cycles[] = {3, 15, 28, 56, 84, 112, 144, 480};
 
 static bool configure_adc(const adc_config *cfg, bool timer)
 {
@@ -58,18 +58,22 @@ static bool configure_adc(const adc_config *cfg, bool timer)
     return HAL_ADC_AnalogWDGConfig(&adc, &watchdog) == HAL_OK;
 }
 
-uint32_t adc_driver_start(const adc_config *cfg, uint32_t rate_hz, uint16_t samples)
+void adc_driver_clocks(uint32_t *timer_hz, uint32_t *adc_hz)
 {
     const uint32_t apb1 = HAL_RCC_GetPCLK1Freq();
-    const uint32_t timer_clock = apb1 == HAL_RCC_GetHCLKFreq() ? apb1 : apb1 * 2u;
-    const uint32_t ticks = rate_hz ? (timer_clock * cfg->ranks + rate_hz - 1u) / rate_hz : 0;
-    const uint32_t actual = rate_hz ? (timer_clock * cfg->ranks) / ticks : 1;
-    unsigned cycles = 0;
-    for (unsigned i = 0; i < cfg->ranks; ++i)
-        cycles += sample_cycles[cfg->times[i]] + cfg->resolution + 2;
-    if ((uint64_t)cycles * actual > (uint64_t)(HAL_RCC_GetPCLK2Freq() / 4u) * cfg->ranks)
-        return 0;
+    *timer_hz = apb1 == HAL_RCC_GetHCLKFreq() ? apb1 : apb1 * 2u;
+    *adc_hz = HAL_RCC_GetPCLK2Freq() / 4u;
+}
 
+void adc_driver_reference(uint16_t *code, uint16_t *millivolts)
+{
+    *code = *(const volatile uint16_t *)VREFINT_CAL_ADDR;
+    *millivolts = VREFINT_CAL_VREF;
+}
+
+bool adc_driver_start(const adc_config *cfg, const adc_plan *plan, uint16_t samples)
+{
+    const uint32_t ticks = plan->timer_ticks;
     __HAL_RCC_ADC1_CLK_ENABLE();
     __HAL_RCC_DMA2_CLK_ENABLE();
     __HAL_RCC_TIM2_CLK_ENABLE();
@@ -78,7 +82,10 @@ uint32_t adc_driver_start(const adc_config *cfg, uint32_t rate_hz, uint16_t samp
     __HAL_RCC_GPIOC_CLK_ENABLE();
     __HAL_RCC_ADC_FORCE_RESET();
     __HAL_RCC_ADC_RELEASE_RESET();
-    if (!configure_adc(cfg, rate_hz != 0)) return 0;
+    if (!configure_adc(cfg, ticks != 0)) {
+        HAL_ADC_DeInit(&adc);
+        return false;
+    }
 
     finite = samples && samples <= ADC_BLOCK ? samples : 0;
     adc_dma = (DMA_HandleTypeDef){
@@ -92,7 +99,10 @@ uint32_t adc_driver_start(const adc_config *cfg, uint32_t rate_hz, uint16_t samp
         },
     };
     __HAL_LINKDMA(&adc, DMA_Handle, adc_dma);
-    if (HAL_DMA_Init(&adc_dma) != HAL_OK) return 0;
+    if (HAL_DMA_Init(&adc_dma) != HAL_OK) {
+        HAL_ADC_DeInit(&adc);
+        return false;
+    }
     ready = read_at = errors = 0;
     threshold = false;
     TIM2->CR1 = 0;
@@ -112,11 +122,11 @@ uint32_t adc_driver_start(const adc_config *cfg, uint32_t rate_hz, uint16_t samp
         HAL_NVIC_DisableIRQ(ADC_IRQn);
         HAL_DMA_DeInit(&adc_dma);
         HAL_ADC_DeInit(&adc);
-        return 0;
+        return false;
     }
     active = true;
-    if (rate_hz) TIM2->CR1 = TIM_CR1_CEN;
-    return actual;
+    if (ticks) TIM2->CR1 = TIM_CR1_CEN;
+    return true;
 }
 
 void adc_driver_stop(void)

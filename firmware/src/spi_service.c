@@ -1,7 +1,8 @@
 #include "spi_service.h"
 
 static jobs spi_jobs;
-static bool configured, selected, in_flight;
+static bool configured, selected;
+static job *active;
 static uint8_t word_bytes;
 static uint16_t setup_ms, hold_ms;
 static uint32_t now_ms, ready_at, release_at;
@@ -9,8 +10,13 @@ static _Alignas(2) uint8_t tx[JOB_DATA], rx[JOB_DATA];
 
 static void abort_transaction(void)
 {
-    if (in_flight) spi_driver_abort();
-    in_flight = false;
+    if (active) {
+        const uint16_t received = spi_driver_received();
+        active->complete = received > active->length ? active->length : received;
+        for (unsigned i = 0; i < active->complete; ++i) active->data[i] = rx[i];
+        spi_driver_abort();
+        active = 0;
+    }
     if (selected) spi_driver_select(false);
     selected = false;
 }
@@ -21,11 +27,13 @@ static uint16_t advance(job *task, bool cancel)
         abort_transaction();
         return STATUS_CANCELLED;
     }
-    if (!in_flight) {
+    if (!active) {
         if (now_ms - ready_at >= 0x80000000u) return JOB_PENDING;
         for (unsigned i = 0; i < task->length; ++i) tx[i] = task->data[i];
-        in_flight = spi_driver_start(tx, rx, task->length);
-        if (in_flight) return JOB_PENDING;
+        if (spi_driver_start(tx, rx, task->length)) {
+            active = task;
+            return JOB_PENDING;
+        }
         abort_transaction();
         return STATUS_IO;
     }
@@ -35,7 +43,7 @@ static uint16_t advance(job *task, bool cancel)
         abort_transaction();
         return result;
     }
-    in_flight = false;
+    active = 0;
     release_at = now_ms + hold_ms;
     task->complete = task->length;
     for (unsigned i = 0; i < task->complete; ++i) task->data[i] = rx[i];

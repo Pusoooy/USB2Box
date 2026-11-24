@@ -10,6 +10,7 @@ import unittest
 
 from usb2xxx import Busy, Deadline, I2CMessage, LeaseExpired, RemoteError, USB2XXX
 from usb2xxx.protocol import HEADER, FrameReader
+from usb2xxx.transport import acquire_device_lock
 
 
 class SDKTests(unittest.TestCase):
@@ -41,6 +42,7 @@ class SDKTests(unittest.TestCase):
             with self.assertRaises(RemoteError) as error:
                 dev.i2c_transfer(0, 41, [I2CMessage(read=2)])
             self.assertEqual(error.exception.status, 0x4001)
+            self.assertEqual(dev.i2c_recover(0), {"pulses": 0, "scl_high": True, "sda_high": True})
 
             for group in range(2):
                 dev.pwm_configure(group, 1000 + group * 325, 250000)
@@ -50,6 +52,7 @@ class SDKTests(unittest.TestCase):
             self.assertEqual(conflict.exception.detail["resource"], 0)
             self.assertEqual(dev.spi_transfer([pattern], bits=16, mode=3, cs=1), [pattern])
             self.assertEqual(dev.adc_read_once(11), 341)
+            self.assertEqual(dev.adc_estimate_reference(), 3.3)
             dev.adc_configure([(10, 2), (11, 2)])
             dev.adc_start(50000, 256)
             with self.assertRaises(Busy) as conflict:
@@ -63,6 +66,7 @@ class SDKTests(unittest.TestCase):
                     break
                 time.sleep(0.004)
             self.assertEqual(len(samples), 256)
+            self.assertTrue(dev.diagnostic_log())
             with TemporaryDirectory() as directory:
                 filename = Path(directory) / "capture.csv"
                 block.save(filename)
@@ -80,6 +84,9 @@ class SDKTests(unittest.TestCase):
                 await dev.call(5, 3, (100000).to_bytes(4, "little") + bytes([8, 0, 0, 0, 0, 0]))
                 blocks = [block async for block in dev.capture_stream()]
                 self.assertEqual(sum(len(block.samples) for block in blocks), 8)
+                self.assertEqual(blocks[0].scan_channels, (10,))
+                self.assertEqual(blocks[0].scan_period_ns, 10000)
+                self.assertEqual(blocks[0].sample_position(1)[1] - blocks[0].sample_position(0)[1], 10)
         asyncio.run(run())
         result = subprocess.check_output([sys.executable, "-m", "usb2xxx.cli", "--mock", "adc", "10"])
         self.assertEqual(json.loads(result), {"simulated": True, "result": {"sample": 310}})
@@ -154,6 +161,25 @@ class SDKTests(unittest.TestCase):
             reader.read(0.1)
         frame = reader.read(0.1)
         self.assertEqual((frame.stream, frame.sequence, frame.payload), (2, 65535, b"data"))
+
+    def test_cross_process_device_lock_released_on_close(self):
+        child = """
+import sys
+from pathlib import Path
+from usb2xxx import Busy
+from usb2xxx.transport import acquire_device_lock
+try:
+    with acquire_device_lock(Path(sys.argv[1])):
+        sys.exit(0)
+except Busy:
+    sys.exit(2)
+"""
+        with TemporaryDirectory() as scratch:
+            path = Path(scratch) / "device.lock"
+            argv = [sys.executable, "-c", child, str(path)]
+            with acquire_device_lock(path):
+                self.assertEqual(subprocess.run(argv, check=False, timeout=5).returncode, 2)
+            self.assertEqual(subprocess.run(argv, check=False, timeout=5).returncode, 0)
 
 
 if __name__ == "__main__":

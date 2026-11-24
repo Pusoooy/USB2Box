@@ -1,14 +1,23 @@
 #include "i2c_service.h"
 
 typedef struct {
+    resources *pool;
     uint32_t speed;
     uint8_t address, messages, offset;
     bool configured, slave, waiting;
     uint8_t read_data[JOB_DATA];
+    uint32_t recovery_at;
+    uint8_t recovery_phase, recovery_pulses;
 } i2c_bus;
 
 static i2c_bus buses[2];
 static jobs queue;
+static uint32_t poll_time;
+
+enum {
+    RECOVERY_IDLE, RECOVERY_WAIT_BUS, RECOVERY_CLOCK_LOW, RECOVERY_CLOCK_HIGH,
+    RECOVERY_STOP_PREPARE, RECOVERY_STOP_LOW, RECOVERY_STOP_HIGH, RECOVERY_SETTLE,
+};
 
 typedef struct {
     uint32_t sequence, now;
@@ -23,6 +32,7 @@ static struct {
 void i2c_record_slave_event(unsigned bus, uint8_t kind, const uint8_t *data,
                              uint8_t count, uint32_t now)
 {
+    if (count > I2C_SLAVE_BYTES) return;
     const uint32_t sequence = events[bus].sequence++;
     if (kind == I2C_EVENT_RX) __atomic_add_fetch(&events[bus].received, count, __ATOMIC_RELAXED);
     if (kind == I2C_EVENT_ERROR) __atomic_add_fetch(&events[bus].errors, 1, __ATOMIC_RELAXED);
@@ -90,12 +100,94 @@ static uint16_t read_events(unsigned bus, bool legacy, uint8_t *out)
 
 static bool init_bus(unsigned bus)
 {
-    const i2c_bus *b = &buses[bus];
-    return i2c_driver_init(bus, b->speed, b->slave, b->address);
+    i2c_bus *b = &buses[bus];
+    if (i2c_driver_init(bus, b->speed, b->slave, b->address)) return true;
+    b->configured = false;
+    resource_release(b->pool, (uint8_t)(3 + bus));
+    return false;
+}
+
+static void recovery_next(i2c_bus *bus, uint8_t phase)
+{
+    bus->recovery_phase = phase;
+    bus->recovery_at = poll_time + 1u;
+}
+
+static uint16_t finish_recovery(job *task, uint16_t status)
+{
+    const unsigned bus = task->lane;
+    i2c_bus *b = &buses[bus];
+    i2c_driver_recovery_drive(bus, true, true);
+    task->data[0] = b->recovery_pulses;
+    task->data[1] = i2c_driver_lines(bus);
+    task->complete = 2;
+    b->recovery_phase = RECOVERY_IDLE;
+    if (!init_bus(bus)) return STATUS_IO;
+    return status;
+}
+
+static uint16_t recovery_step(job *task, bool cancel)
+{
+    const unsigned bus = task->lane;
+    i2c_bus *b = &buses[bus];
+    if (cancel) return finish_recovery(task, STATUS_CANCELLED);
+    if (b->recovery_phase == RECOVERY_IDLE) {
+        b->recovery_pulses = 0;
+        i2c_driver_recovery_begin(bus);
+        recovery_next(b, RECOVERY_WAIT_BUS);
+        return JOB_PENDING;
+    }
+    if (poll_time - b->recovery_at >= 0x80000000u) return JOB_PENDING;
+
+    const uint8_t levels = i2c_driver_lines(bus);
+    switch (b->recovery_phase) {
+    case RECOVERY_WAIT_BUS:
+        if (!(levels & I2C_LINE_SCL)) break;
+        if (levels & I2C_LINE_SDA) return finish_recovery(task, STATUS_OK);
+        i2c_driver_recovery_drive(bus, false, true);
+        recovery_next(b, RECOVERY_CLOCK_LOW);
+        break;
+    case RECOVERY_CLOCK_LOW:
+        i2c_driver_recovery_drive(bus, true, true);
+        recovery_next(b, RECOVERY_CLOCK_HIGH);
+        break;
+    case RECOVERY_CLOCK_HIGH:
+        if (!(levels & I2C_LINE_SCL)) break; /* Clock stretching. */
+        ++b->recovery_pulses;
+        if (levels & I2C_LINE_SDA) {
+            i2c_driver_recovery_drive(bus, false, true);
+            recovery_next(b, RECOVERY_STOP_PREPARE);
+        } else if (b->recovery_pulses == 9) {
+            return finish_recovery(task, STATUS_IO);
+        } else {
+            i2c_driver_recovery_drive(bus, false, true);
+            recovery_next(b, RECOVERY_CLOCK_LOW);
+        }
+        break;
+    case RECOVERY_STOP_PREPARE:
+        i2c_driver_recovery_drive(bus, false, false);
+        recovery_next(b, RECOVERY_STOP_LOW);
+        break;
+    case RECOVERY_STOP_LOW:
+        i2c_driver_recovery_drive(bus, true, false);
+        recovery_next(b, RECOVERY_STOP_HIGH);
+        break;
+    case RECOVERY_STOP_HIGH:
+        if (!(levels & I2C_LINE_SCL)) break;
+        i2c_driver_recovery_drive(bus, true, true);
+        recovery_next(b, RECOVERY_SETTLE);
+        break;
+    case RECOVERY_SETTLE:
+        return finish_recovery(task, levels == (I2C_LINE_SCL | I2C_LINE_SDA) ? STATUS_OK : STATUS_IO);
+    default:
+        return finish_recovery(task, STATUS_IO);
+    }
+    return JOB_PENDING;
 }
 
 static uint16_t transfer_step(job *task, bool cancel)
 {
+    if (!task->length) return recovery_step(task, cancel);
     const unsigned bus = task->lane;
     i2c_bus *b = &buses[bus];
     if (cancel) {
@@ -141,6 +233,7 @@ static uint16_t transfer_step(job *task, bool cancel)
 
 void i2c_poll(uint32_t now)
 {
+    poll_time = now;
     for (unsigned bus = 0; bus < 2; ++bus)
         if (buses[bus].configured && buses[bus].slave) i2c_driver_service(bus);
     jobs_poll(&queue, transfer_step, now);
@@ -202,11 +295,11 @@ uint16_t i2c_command(resources *pool, uint8_t opcode, const uint8_t *input,
         const uint16_t status = resource_reserve(pool, &plan, owner, &conflict);
         if (status != STATUS_OK) return status;
         b->speed = speed;
+        b->pool = pool;
         b->slave = false;
         b->address = 0;
         reset_events(bus);
         b->configured = init_bus(bus);
-        if (!b->configured) resource_release(pool, owner);
         return b->configured ? STATUS_OK : STATUS_IO;
     }
     case 2:
@@ -218,7 +311,6 @@ uint16_t i2c_command(resources *pool, uint8_t opcode, const uint8_t *input,
         b->slave = input[1] != 0;
         b->address = input[2];
         b->configured = init_bus(bus);
-        if (!b->configured) resource_release(pool, owner);
         return b->configured ? STATUS_OK : STATUS_IO;
     case 3:
         if (length < 13 || !valid_transfer(input + 9, length - 9)) return STATUS_VALUE;
@@ -242,6 +334,11 @@ uint16_t i2c_command(resources *pool, uint8_t opcode, const uint8_t *input,
         reset_events(bus);
         resource_release(pool, owner);
         return STATUS_OK;
+    case 8:
+        if (length != 9) return STATUS_VALUE;
+        if (!b->configured || b->slave || bus_busy(bus)) return STATUS_BUSY;
+        return job_submit(&queue, wire_u32(input + 1), (uint8_t)bus,
+                          0, 0, now, wire_u32(input + 5));
     default:
         return STATUS_OPCODE;
     }

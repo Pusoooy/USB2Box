@@ -45,7 +45,7 @@ uint16_t app_command(uint8_t service, uint8_t opcode, const uint8_t *input,
         status = spi_command(&pool, opcode, input, length, output, written, now);
         break;
     case SERVICE_ADC:
-        status = adc_command(&pool, opcode, input, length, output, written);
+        status = adc_command(&pool, opcode, input, length, output, written, now);
         break;
     case SERVICE_SYS:
         if ((opcode == SYS_CANCEL || opcode == SYS_COLLECT) && length == 4)

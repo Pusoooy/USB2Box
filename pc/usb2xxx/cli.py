@@ -2,7 +2,7 @@
 from argparse import ArgumentParser
 import json
 
-from . import DeviceError, I2CMessage, USB2XXX, list_devices
+from . import Deadline, DeviceError, I2CMessage, USB2XXX, list_devices
 
 
 def connection_args(parser: ArgumentParser) -> None:
@@ -21,7 +21,7 @@ def main() -> None:
     parser = ArgumentParser(prog="usb2xxx")
     connection_args(parser)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("list", "status", "stop"):
+    for name in ("list", "status", "stop", "log", "vref"):
         commands.add_parser(name)
     uart = commands.add_parser("uart")
     uart.add_argument("hex")
@@ -32,6 +32,8 @@ def main() -> None:
     i2c.add_argument("--bus", type=int, default=0)
     i2c.add_argument("--write", default="")
     i2c.add_argument("--read", type=int, default=0)
+    recovery = commands.add_parser("i2c-recover")
+    recovery.add_argument("--bus", choices=(0, 1), type=int, default=0)
     spi = commands.add_parser("spi")
     spi.add_argument("segments", nargs="+")
     spi.add_argument("--mode", type=int, default=0)
@@ -58,6 +60,13 @@ def main() -> None:
 def _run(args, dev: USB2XXX):
     if args.command == "status":
         return {"capabilities": dev.capabilities(), "resources": dev.resources()}
+    if args.command == "log":
+        return dev.diagnostic_log()
+    if args.command == "vref":
+        return {"reference_volts": dev.adc_estimate_reference()}
+    if args.command == "i2c-recover":
+        dev.i2c_configure(args.bus)
+        return dev.i2c_recover(args.bus)
     if args.command == "stop":
         dev.stop_all()
         return {"safe_stop": True}
@@ -69,7 +78,6 @@ def _run(args, dev: USB2XXX):
     if args.command == "uart":
         dev.uart_configure(args.port, args.baud)
         from time import monotonic, sleep
-        from . import Deadline
         queued = dev.uart_write(args.port, bytes.fromhex(args.hex))
         end = monotonic() + 1.5
         while dev.uart_stats(args.port)[2]:

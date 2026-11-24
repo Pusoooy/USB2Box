@@ -4,5 +4,6 @@
 #include <stdint.h>
 
 void pwm_mock_tick(uint32_t now);
+void adc_mock_tick(uint32_t now);
 
 #endif

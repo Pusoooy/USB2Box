@@ -11,9 +11,9 @@ static void setup(resources *pool)
     const uint8_t adc[] = {12, 1, 10, 2};
     const uint8_t capture[] = {0xa0, 0x86, 1, 0, 10, 0, 0, 0, 0, 0};
     const uint8_t credit[] = {3, 0, 0, 0, 1, 0};
-    assert(adc_command(pool, 1, adc, sizeof adc, out, &result) == STATUS_OK);
-    assert(adc_command(pool, 3, capture, sizeof capture, out, &result) == STATUS_OK);
-    assert(adc_command(pool, ADC_TAGGED_CREDIT, credit, sizeof credit, out, &result) == STATUS_OK);
+    assert(adc_command(pool, 1, adc, sizeof adc, out, &result, 1234) == STATUS_OK);
+    assert(adc_command(pool, 3, capture, sizeof capture, out, &result, 1234) == STATUS_OK);
+    assert(adc_command(pool, ADC_TAGGED_CREDIT, credit, sizeof credit, out, &result, 1234) == STATUS_OK);
     adc_poll();
     for (uint8_t port = 0; port < 2; ++port) {
         const uint8_t cfg[] = {port, 0, 0xc2, 1, 0, 0, 1};

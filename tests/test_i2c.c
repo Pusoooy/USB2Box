@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <stdio.h>
 
+void i2c_mock_stuck(unsigned bus, unsigned release_after, bool stuck_clock);
+
 int main(void)
 {
     resources pool;
@@ -50,7 +52,20 @@ int main(void)
         i2c_poll(25);
         assert(i2c_job_command(SYS_COLLECT, 1, out, &written) == STATUS_OK);
         assert(wire_u16(out) == STATUS_TIMEOUT);
+        const uint8_t recovery[] = {master, 2, 0, 0, 0, 60, 0, 0, 0};
+        const unsigned releases[] = {0, 3, 10, 0};
+        const uint16_t statuses[] = {STATUS_OK, STATUS_OK, STATUS_IO, STATUS_TIMEOUT};
+        const uint8_t pulses[] = {0, 3, 9, 0};
+        for (unsigned trial = 0; trial < 4; ++trial) {
+            const uint32_t start = 100 + trial * 100;
+            i2c_mock_stuck(master, releases[trial], trial == 3);
+            assert(i2c_command(&pool, 8, recovery, sizeof recovery, out, &written, start) == STATUS_OK);
+            for (uint32_t now = start; now < start + 70; ++now) i2c_poll(now);
+            assert(i2c_job_command(SYS_COLLECT, 2, out, &written) == STATUS_OK);
+            assert(written == 6 && wire_u16(out) == statuses[trial] && out[4] == pulses[trial]);
+            if (trial < 2) assert(out[5] == (I2C_LINE_SCL | I2C_LINE_SDA));
+        }
         i2c_stop_all(&pool);
     }
-    puts("I2C dual master/slave combined transactions, events and timeout passed");
+    puts("I2C dual master/slave, FIFO, timeouts and bounded bus recovery passed");
 }

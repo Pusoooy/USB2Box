@@ -98,5 +98,26 @@ int main(void)
     reply(&dev, STATUS_OK, 5);
     device_reset(&dev);
     assert(stopped == 3);
-    puts("device Mock Bulk framing, request wrap, backpressure and lease passed");
+    h = (frame_header){.opcode = SYS_OPEN, .request_id = 6, .flags = FLAG_FIRST | FLAG_LAST};
+    send(&dev, h, NULL, 4000);
+    reply(&dev, STATUS_OK, 6);
+    h.service = SERVICE_DIAG;
+    h.opcode = 255;
+    for (unsigned i = 0; i < DEVICE_LOG_CAPACITY + 2; ++i) {
+        ++h.request_id;
+        send(&dev, h, NULL, 4000 + i);
+        reply(&dev, STATUS_OPCODE, h.request_id);
+    }
+    h.opcode = 2;
+    ++h.request_id;
+    h.length = h.total = 2;
+    const uint8_t log_query[] = {1, 2};
+    send(&dev, h, log_query, 4050);
+    wire = device_reply(&dev, &length);
+    const uint8_t *log = wire + FRAME_HEADER_SIZE;
+    assert(length == FRAME_HEADER_SIZE + 8 + 32 && wire_u32(log) > 0 && log[4] == 2);
+    assert(wire_u32(log + 8 + 4) == h.request_id - 2);
+    assert(wire_u32(log + 8 + 16 + 4) == h.request_id - 1);
+    reply(&dev, STATUS_OK, h.request_id);
+    puts("device Mock Bulk framing, backpressure, lease and bounded diagnostic log passed");
 }
