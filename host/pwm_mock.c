@@ -9,6 +9,8 @@ static struct {
 } outputs[PWM_GROUPS];
 
 static uint32_t last_ms;
+static uint64_t adc_cycles;
+static bool adc_enabled;
 
 uint32_t pwm_driver_clock(void) { return 84000000; }
 
@@ -46,6 +48,16 @@ bool pwm_driver_update(unsigned group, const pwm_period periods[PWM_CHANNELS])
 
 bool pwm_driver_update_pending(unsigned group) { return outputs[group].pending; }
 
+bool pwm_driver_adc_trigger(bool enable)
+{
+    if (enable && !outputs[1].active) return false;
+    adc_enabled = enable;
+    if (enable) adc_cycles = 0;
+    return true;
+}
+
+uint64_t pwm_mock_adc_cycles(void) { return adc_cycles; }
+
 void pwm_mock_tick(uint32_t now)
 {
     const uint32_t delta = now - last_ms;
@@ -59,6 +71,7 @@ void pwm_mock_tick(uint32_t now)
         const uint64_t cycles = total / 1000000u;
         outputs[group].phase = (uint32_t)(total % 1000000u);
         if (!cycles) continue;
+        if (group == 1 && adc_enabled) adc_cycles += cycles;
         if (outputs[group].pending) {
             for (unsigned channel = 0; channel < PWM_CHANNELS; ++channel)
                 outputs[group].current[channel] = outputs[group].next[channel];

@@ -8,6 +8,13 @@ static uint16_t cs_pin;
 static bool active_high, wide;
 static volatile uint16_t transfer_status;
 static uint16_t transfer_bytes;
+static volatile bool irq_transfer;
+static const uint8_t *irq_tx;
+static uint8_t *irq_rx;
+static uint16_t irq_sent;
+static volatile uint16_t irq_received;
+
+enum { SPI_IRQ_MASK = SPI_CR2_ERRIE | SPI_CR2_RXNEIE | SPI_CR2_TXEIE };
 
 void spi_driver_select(bool active)
 {
@@ -19,6 +26,43 @@ static void set_irq(IRQn_Type irq)
     HAL_NVIC_ClearPendingIRQ(irq);
     HAL_NVIC_SetPriority(irq, 8, 0);
     HAL_NVIC_EnableIRQ(irq);
+}
+
+bool spi_driver_enable_dma(void)
+{
+    __HAL_RCC_DMA2_CLK_ENABLE();
+    receive = (DMA_HandleTypeDef){
+        .Instance = DMA2_Stream0,
+        .Init = {
+            .Channel = DMA_CHANNEL_3, .Direction = DMA_PERIPH_TO_MEMORY,
+            .MemInc = DMA_MINC_ENABLE, .Priority = DMA_PRIORITY_MEDIUM,
+            .PeriphDataAlignment = wide ? DMA_PDATAALIGN_HALFWORD : DMA_PDATAALIGN_BYTE,
+            .MemDataAlignment = wide ? DMA_MDATAALIGN_HALFWORD : DMA_MDATAALIGN_BYTE,
+        },
+    };
+    transmit = receive;
+    transmit.Instance = DMA2_Stream3;
+    transmit.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    if (HAL_DMA_Init(&receive) != HAL_OK || HAL_DMA_Init(&transmit) != HAL_OK) {
+        HAL_DMA_DeInit(&receive);
+        HAL_DMA_DeInit(&transmit);
+        return false;
+    }
+    __HAL_LINKDMA(&spi, hdmarx, receive);
+    __HAL_LINKDMA(&spi, hdmatx, transmit);
+    set_irq(DMA2_Stream0_IRQn);
+    set_irq(DMA2_Stream3_IRQn);
+    return true;
+}
+
+void spi_driver_disable_dma(void)
+{
+    HAL_NVIC_DisableIRQ(DMA2_Stream0_IRQn);
+    HAL_NVIC_DisableIRQ(DMA2_Stream3_IRQn);
+    HAL_DMA_DeInit(&receive);
+    HAL_DMA_DeInit(&transmit);
+    spi.hdmarx = NULL;
+    spi.hdmatx = NULL;
 }
 
 uint32_t spi_driver_init(const spi_config *config)
@@ -33,23 +77,10 @@ uint32_t spi_driver_init(const spi_config *config)
     if (clock / divisor > config->hz) return 0;
 
     __HAL_RCC_SPI1_CLK_ENABLE();
-    __HAL_RCC_DMA2_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
     wide = config->bits == 16;
-    receive = (DMA_HandleTypeDef){
-        .Instance = DMA2_Stream0,
-        .Init = {
-            .Channel = DMA_CHANNEL_3, .Direction = DMA_PERIPH_TO_MEMORY,
-            .MemInc = DMA_MINC_ENABLE, .Priority = DMA_PRIORITY_MEDIUM,
-            .PeriphDataAlignment = wide ? DMA_PDATAALIGN_HALFWORD : DMA_PDATAALIGN_BYTE,
-            .MemDataAlignment = wide ? DMA_MDATAALIGN_HALFWORD : DMA_MDATAALIGN_BYTE,
-        },
-    };
-    transmit = receive;
-    transmit.Instance = DMA2_Stream3;
-    transmit.Init.Direction = DMA_MEMORY_TO_PERIPH;
     spi = (SPI_HandleTypeDef){
         .Instance = SPI1,
         .Init = {
@@ -61,10 +92,7 @@ uint32_t spi_driver_init(const spi_config *config)
             .FirstBit = config->lsb ? SPI_FIRSTBIT_LSB : SPI_FIRSTBIT_MSB,
         },
     };
-    __HAL_LINKDMA(&spi, hdmarx, receive);
-    __HAL_LINKDMA(&spi, hdmatx, transmit);
-    if (HAL_DMA_Init(&receive) != HAL_OK || HAL_DMA_Init(&transmit) != HAL_OK ||
-        HAL_SPI_Init(&spi) != HAL_OK) return 0;
+    if (HAL_SPI_Init(&spi) != HAL_OK) return 0;
 
     GPIO_InitTypeDef pins = {
         .Pin = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7, .Mode = GPIO_MODE_AF_PP,
@@ -78,39 +106,102 @@ uint32_t spi_driver_init(const spi_config *config)
     pins = (GPIO_InitTypeDef){.Pin = cs_pin, .Mode = GPIO_MODE_OUTPUT_PP};
     HAL_GPIO_Init(cs_gpio, &pins);
 
-    set_irq(DMA2_Stream0_IRQn);
-    set_irq(DMA2_Stream3_IRQn);
+    irq_transfer = false;
     set_irq(SPI1_IRQn);
     return clock / divisor;
 }
 
 void spi_driver_deinit(void)
 {
-    HAL_NVIC_DisableIRQ(DMA2_Stream0_IRQn);
-    HAL_NVIC_DisableIRQ(DMA2_Stream3_IRQn);
     HAL_NVIC_DisableIRQ(SPI1_IRQn);
     HAL_SPI_DeInit(&spi);
-    HAL_DMA_DeInit(&receive);
-    HAL_DMA_DeInit(&transmit);
     HAL_GPIO_DeInit(GPIOA, GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7);
 }
 
-bool spi_driver_start(uint8_t *tx, uint8_t *rx, uint16_t bytes)
+static void read_irq_word(void)
 {
+    if (wide) wire_put16(irq_rx + irq_received, (uint16_t)SPI1->DR);
+    else irq_rx[irq_received] = *(__IO uint8_t *)&SPI1->DR;
+    __DMB();
+    irq_received += wide ? 2u : 1u;
+}
+
+static void short_irq(void)
+{
+    const uint32_t flags = SPI1->SR;
+    if (flags & (SPI_SR_MODF | SPI_SR_OVR | SPI_SR_FRE)) {
+        CLEAR_BIT(SPI1->CR2, SPI_IRQ_MASK);
+        transfer_status = STATUS_IO;
+        return;
+    }
+    if ((flags & SPI_SR_RXNE) && irq_received < irq_sent) read_irq_word();
+    if (irq_received == transfer_bytes) {
+        CLEAR_BIT(SPI1->CR2, SPI_IRQ_MASK);
+        return;
+    }
+    if (irq_received != irq_sent) return;
+    if (!(flags & SPI_SR_TXE)) {
+        SET_BIT(SPI1->CR2, SPI_CR2_TXEIE);
+        return;
+    }
+    CLEAR_BIT(SPI1->CR2, SPI_CR2_TXEIE);
+    if (wide) SPI1->DR = wire_u16(irq_tx + irq_sent);
+    else *(__IO uint8_t *)&SPI1->DR = irq_tx[irq_sent];
+    irq_sent += wide ? 2u : 1u;
+}
+
+bool spi_driver_start(const uint8_t *tx, uint8_t *rx, uint16_t bytes)
+{
+    USB2_ASSERT(bytes && bytes <= JOB_DATA && (!wide || bytes % 2u == 0));
+    if (!bytes || bytes > JOB_DATA || (wide && bytes % 2u)) return false;
     transfer_bytes = bytes;
     transfer_status = JOB_PENDING;
-    return HAL_SPI_TransmitReceive_DMA(&spi, tx, rx, wide ? bytes / 2 : bytes) == HAL_OK;
+    irq_transfer = bytes <= SPI_IRQ_MAX_BYTES;
+    if (irq_transfer) {
+        irq_tx = tx;
+        irq_rx = rx;
+        irq_sent = irq_received = 0;
+        __HAL_SPI_ENABLE(&spi);
+        __DMB();
+        SET_BIT(SPI1->CR2, SPI_IRQ_MASK);
+        return true;
+    }
+    if (!spi.hdmarx || !spi.hdmatx) return false;
+    if (HAL_SPI_TransmitReceive_DMA(&spi, tx, rx, wide ? bytes / 2 : bytes) == HAL_OK) return true;
+    spi_driver_abort();
+    return false;
 }
-uint16_t spi_driver_result(void) { return transfer_status; }
 
-uint16_t spi_driver_received(void)
+uint16_t spi_driver_result(void)
 {
+    if (irq_transfer && transfer_status == JOB_PENDING && irq_received == transfer_bytes &&
+        !(SPI1->SR & SPI_SR_BSY)) {
+        __DMB();
+        return STATUS_OK;
+    }
+    return transfer_status;
+}
+
+static void reset_spi(void)
+{
+    __HAL_RCC_SPI1_FORCE_RESET();
+    __HAL_RCC_SPI1_RELEASE_RESET();
+    HAL_SPI_Init(&spi);
+}
+
+uint16_t spi_driver_abort(void)
+{
+    if (irq_transfer) {
+        CLEAR_BIT(SPI1->CR2, SPI_IRQ_MASK);
+        if ((SPI1->SR & SPI_SR_RXNE) && irq_received < irq_sent) read_irq_word();
+        reset_spi();
+        return irq_received;
+    }
+    if (HAL_SPI_Abort(&spi) != HAL_OK) reset_spi();
     const uint32_t remaining = __HAL_DMA_GET_COUNTER(&receive) * (wide ? 2u : 1u);
     __DMB();
     return remaining > transfer_bytes ? 0 : (uint16_t)(transfer_bytes - remaining);
 }
-
-void spi_driver_abort(void) { HAL_SPI_Abort(&spi); }
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *handle)
 {
@@ -122,4 +213,11 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *handle)
 }
 void DMA2_Stream0_IRQHandler(void) { HAL_DMA_IRQHandler(&receive); }
 void DMA2_Stream3_IRQHandler(void) { HAL_DMA_IRQHandler(&transmit); }
-void SPI1_IRQHandler(void) { HAL_SPI_IRQHandler(&spi); }
+void SPI1_IRQHandler(void)
+{
+    if (irq_transfer) {
+        if (SPI1->CR2 & SPI_IRQ_MASK) short_irq();
+    } else {
+        HAL_SPI_IRQHandler(&spi);
+    }
+}

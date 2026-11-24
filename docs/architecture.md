@@ -44,6 +44,8 @@ STM32 USB DCD/TinyUSB -> 帧解析/流解复用 -> Request ID会话/超时/取�
 
 > 这是编写代码前的**预算目标**而非已验证的实际占用。HAL、USB DCD以及链接对齐可能改变结果。Codex必须在每次构建后根据ELF/MAP与实际最大栈水位调整预算。ADC大捕获与高缓存SPI的最大值可通过模式互斥使用共享池。**分段上传不等于可以在没有外部存储时无损缓存无限长度的高速连续采样**。
 
+当前固件以 33 个 256 B 定长块承载 ADC 捕获和 SPI RX，两项可同时各持有完整租约。SPI 从已排队且对齐的作业数据直接发送，RX 结果在中断或 DMA 停止后提交到作业，USB 端点继续使用有界队列。SPI 的 8 B 及以下分段使用中断，较长分段才申请 DMA2 S0/S3。
+
 ## 模块状态机与事件
 
 `UNCONFIGURED -> CONFIGURED -> RUNNING -> STOPPING -> STOPPED`；失败进入 `ERROR -> RECOVERING -> STOPPED`。设备级状态包括 `NO_SESSION/SESSION_ACTIVE/LEASE_EXPIRED/USB_DISCONNECTED/SAFE_MODE`。事件通知需包含模块、通道、时间、原因、关联Request ID、已完成工作量。

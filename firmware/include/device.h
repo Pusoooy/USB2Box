@@ -23,6 +23,8 @@ enum {
     FEATURE_I2C_RECOVERY = 1u << 4,
     FEATURE_DIAGNOSTIC_LOG = 1u << 5,
     FEATURE_PWM_CHANNELS = 1u << 6,
+    FEATURE_SPI_SHORT = 1u << 7,
+    FEATURE_ADC_PWM = 1u << 8,
     DEVICE_LOG_CAPACITY = 16,
 };
 

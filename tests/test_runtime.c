@@ -1,5 +1,7 @@
 #include "jobs.h"
 #include "resources.h"
+#include "adc_service.h"
+#include "buffer_pool.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -10,6 +12,38 @@ static uint16_t advance(job *task, bool cancel)
     if (cancel) return STATUS_CANCELLED;
     task->data[task->complete++] = 42;
     return JOB_PENDING;
+}
+
+static uint16_t wrong_count(job *task, bool cancel)
+{
+    (void)cancel;
+    task->complete = JOB_DATA + 1;
+    return STATUS_OK;
+}
+
+static void check_buffer_pool(void)
+{
+    buffer_lease spi = {0}, adc = {0}, extra = {0};
+    assert(buffer_take(&spi, JOB_DATA / 2));
+    assert(buffer_take(&adc, ADC_CACHE));
+    assert(!buffer_take(&extra, 1));
+    spi.words[0] = 0xabcd;
+    adc.words[0] = 0x4567;
+    adc.words[ADC_CACHE - 1] = 0x1234;
+    assert(spi.words[0] == 0xabcd);
+    buffer_release(&spi);
+    assert(buffer_take(&extra, 1));
+    extra.words[0] = 42;
+    assert(adc.words[0] == 0x4567 && adc.words[ADC_CACHE - 1] == 0x1234);
+    buffer_release(&extra);
+    buffer_release(&extra);
+    buffer_release(&adc);
+    assert(buffer_take(&adc, ADC_CACHE));
+    assert(buffer_take(&spi, JOB_DATA / 2));
+    buffer_release(&adc);
+    buffer_release(&spi);
+    assert(buffer_take(&extra, BUFFER_BLOCKS * BUFFER_BLOCK_WORDS));
+    buffer_release(&extra);
 }
 
 int main(void)
@@ -53,5 +87,10 @@ int main(void)
     assert(job_collect(&queue, 3, out, &count) == STATUS_OK);
     assert(count == 5 && wire_u16(out) == STATUS_CANCELLED && out[4] == 42);
     jobs_reset(&queue, advance);
-    puts("resource atomic reservation and bounded job deadlines, contention and cancellation passed");
+    assert(job_submit(&queue, 1, 0, NULL, 0, now, 5) == STATUS_OK);
+    jobs_poll(&queue, wrong_count, now);
+    assert(job_collect(&queue, 1, out, &count) == STATUS_IO);
+    assert(job_submit(&queue, 1, 0, NULL, 0, now, 5) == STATUS_OK);
+    check_buffer_pool();
+    puts("resource reservation, bounded jobs and shared buffer ownership/recovery passed");
 }

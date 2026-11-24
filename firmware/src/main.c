@@ -2,6 +2,27 @@
 #include "app.h"
 #include "device.h"
 #include "usb_link.h"
+#include "invariant.h"
+
+#ifdef USB2BOX_DEBUG
+#include "stm32f4xx.h"
+
+static const char *volatile assert_file;
+static volatile uint32_t assert_line;
+
+_Noreturn void usb2_assert_failed(const char *file, uint32_t line)
+{
+    if (!assert_line) {
+        assert_file = file;
+        assert_line = line;
+        app_stop();
+        usb_link_shutdown();
+    }
+    __disable_irq();
+    if (CoreDebug->DHCSR & CoreDebug_DHCSR_C_DEBUGEN_Msk) __BKPT(0);
+    for (;;) __WFI();
+}
+#endif
 
 static device dev;
 

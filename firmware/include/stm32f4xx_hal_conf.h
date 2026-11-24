@@ -1,6 +1,8 @@
 #ifndef USB2BOX_HAL_CONF_H
 #define USB2BOX_HAL_CONF_H
 
+#include "invariant.h"
+
 #define HAL_MODULE_ENABLED
 #define HAL_CORTEX_MODULE_ENABLED
 #define HAL_FLASH_MODULE_ENABLED
@@ -35,6 +37,6 @@
 #include "stm32f4xx_hal_tim.h"
 #include "stm32f4xx_hal_pwr.h"
 
-#define assert_param(expr) ((void)0u)
+#define assert_param(expr) USB2_ASSERT(expr)
 
 #endif

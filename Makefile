@@ -31,7 +31,7 @@ ARM_VENDOR_SOURCES := $(ARM_DEPS)/cmsis-device/Source/Templates/system_stm32f4xx
 ARM_SOURCES := firmware/src/startup.S firmware/src/main.c firmware/src/frame.c \
 	firmware/src/bsp.c firmware/src/clock_policy.c firmware/src/memory.c \
 	firmware/src/device.c firmware/src/app.c firmware/src/uart_service.c firmware/src/uart_stm32.c firmware/src/i2c_service.c firmware/src/i2c_stm32.c firmware/src/pwm_service.c firmware/src/pwm_stm32.c firmware/src/spi_service.c firmware/src/spi_stm32.c firmware/src/adc_service.c firmware/src/adc_stm32.c firmware/src/jobs.c firmware/src/resources.c firmware/src/usb_link.c firmware/src/usb_descriptors.c \
-	firmware/src/stream.c $(ARM_VENDOR_SOURCES)
+	firmware/src/stream.c firmware/src/buffer_pool.c $(ARM_VENDOR_SOURCES)
 ARM_HEADERS := $(wildcard firmware/include/*.h firmware/src/*.h)
 ARM_LINKER := firmware/stm32f401rc.ld
 
@@ -41,7 +41,7 @@ ARM_LINKER := firmware/stm32f401rc.ld
 debug: $(DEBUG_DIR)/usb2box.bin $(DEBUG_DIR)/usb2box.hex
 release: $(RELEASE_DIR)/usb2box.bin $(RELEASE_DIR)/usb2box.hex
 
-$(DEBUG_DIR)/usb2box.elf: OPT := -Og -g3
+$(DEBUG_DIR)/usb2box.elf: OPT := -Og -g3 -DUSB2BOX_DEBUG
 $(RELEASE_DIR)/usb2box.elf: OPT := -Os
 $(DEBUG_DIR)/usb2box.elf $(RELEASE_DIR)/usb2box.elf: $(ARM_SOURCES) $(ARM_LINKER) $(ARM_HEADERS) build/generated/dma_routes.inc Makefile tools/arm-dependencies.lock | verify-arm-deps
 	mkdir -p $(@D)
@@ -110,7 +110,7 @@ build/generated/dma_routes.inc: schemas/dma_matrix.csv tools/generate_dma.py
 	mkdir -p $(@D)
 	$(PYTHON) tools/generate_dma.py $< $@
 
-build/host/test-runtime: tests/test_runtime.c firmware/src/resources.c firmware/src/jobs.c firmware/src/device.c firmware/src/frame.c $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
+build/host/test-runtime: tests/test_runtime.c firmware/src/resources.c firmware/src/jobs.c firmware/src/device.c firmware/src/frame.c firmware/src/buffer_pool.c $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
 	mkdir -p $(@D)
 	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
 
@@ -153,7 +153,7 @@ test-pwm: build/host/test-pwm
 
 test-host: test-pwm
 
-HOST_SPI_SOURCES := firmware/src/spi_service.c firmware/src/jobs.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/spi_mock.c
+HOST_SPI_SOURCES := firmware/src/spi_service.c firmware/src/jobs.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c firmware/src/buffer_pool.c host/spi_mock.c
 build/host/test-spi: tests/test_spi.c $(HOST_SPI_SOURCES) $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
 	mkdir -p $(@D)
 	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
@@ -164,8 +164,8 @@ test-spi: build/host/test-spi
 
 test-host: test-spi
 
-HOST_ADC_SOURCES := firmware/src/adc_service.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c host/adc_mock.c
-build/host/test-adc: tests/test_adc.c $(HOST_ADC_SOURCES) $(ARM_HEADERS) build/generated/dma_routes.inc Makefile
+HOST_ADC_SOURCES := firmware/src/adc_service.c firmware/src/resources.c firmware/src/device.c firmware/src/frame.c firmware/src/buffer_pool.c host/adc_mock.c
+build/host/test-adc: tests/test_adc.c $(sort $(HOST_ADC_SOURCES) $(HOST_PWM_SOURCES)) $(ARM_HEADERS) host/mock_clock.h build/generated/dma_routes.inc Makefile
 	mkdir -p $(@D)
 	$(HOST_CC) $(CPPFLAGS) $(WARNINGS) $(HOST_CFLAGS) $(filter %.c,$^) $(HOST_LDFLAGS) -o $@
 

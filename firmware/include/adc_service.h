@@ -6,7 +6,8 @@
 enum {
     ADC_RANKS = 16, ADC_BLOCK = 128, ADC_CACHE = 4096,
     ADC_STREAM_CREDIT = 7, ADC_TAGGED_CREDIT = 9, ADC_TIMED_CREDIT = 10,
-    ADC_TIMED_READ = 11, ADC_REFERENCE_CAL = 12,
+    ADC_TIMED_READ = 11, ADC_REFERENCE_CAL = 12, ADC_PWM_START = 13,
+    ADC_FLAG_TRIGGER_STOPPED = 16,
 };
 typedef struct {
     uint8_t resolution, ranks, channels[ADC_RANKS], times[ADC_RANKS];
@@ -18,6 +19,7 @@ typedef struct {
 typedef struct {
     uint32_t timer_ticks, aggregate_rate, scan_ns, rank_ns[ADC_RANKS];
     uint8_t resolution;
+    bool pwm_trigger;
 } adc_plan;
 
 bool adc_plan_capture(const adc_config *config, uint32_t rate, uint32_t timer_hz,

@@ -4,6 +4,8 @@
 #include "jobs.h"
 #include "resources.h"
 
+enum { SPI_IRQ_MAX_BYTES = 8 };
+
 typedef struct {
     uint8_t mode, bits, lsb, cs, active_high;
     uint32_t hz;
@@ -16,10 +18,11 @@ void spi_stop_all(resources *pool);
 
 uint32_t spi_driver_init(const spi_config *config);
 void spi_driver_deinit(void);
+bool spi_driver_enable_dma(void);
+void spi_driver_disable_dma(void);
 void spi_driver_select(bool active);
-bool spi_driver_start(uint8_t *tx, uint8_t *rx, uint16_t bytes);
+bool spi_driver_start(const uint8_t *tx, uint8_t *rx, uint16_t bytes);
 uint16_t spi_driver_result(void);
-uint16_t spi_driver_received(void);
-void spi_driver_abort(void);
+uint16_t spi_driver_abort(void);
 
 #endif

@@ -1,24 +1,26 @@
 #include "spi_service.h"
+#include "buffer_pool.h"
 
+enum { SPI_OWNER = 7, SPI_DMA_RX = RESOURCE_STREAM(2, 0), SPI_DMA_TX = RESOURCE_STREAM(2, 3) };
 static jobs spi_jobs;
-static bool configured, selected;
+static bool configured, selected, dma_reserved;
 static job *active;
 static uint8_t word_bytes;
 static uint16_t setup_ms, hold_ms;
 static uint32_t now_ms, ready_at, release_at;
-static _Alignas(2) uint8_t tx[JOB_DATA], rx[JOB_DATA];
+static buffer_lease rx;
 
 static void abort_transaction(void)
 {
-    if (active) {
-        const uint16_t received = spi_driver_received();
-        active->complete = received > active->length ? active->length : received;
-        for (unsigned i = 0; i < active->complete; ++i) active->data[i] = rx[i];
-        spi_driver_abort();
-        active = 0;
-    }
     if (selected) spi_driver_select(false);
     selected = false;
+    if (active) {
+        const uint16_t received = spi_driver_abort();
+        active->complete = received > active->length ? active->length : received;
+        const uint8_t *bytes = (const uint8_t *)rx.words;
+        for (unsigned i = 0; i < active->complete; ++i) active->data[i] = bytes[i];
+        active = 0;
+    }
 }
 
 static uint16_t advance(job *task, bool cancel)
@@ -29,8 +31,7 @@ static uint16_t advance(job *task, bool cancel)
     }
     if (!active) {
         if (now_ms - ready_at >= 0x80000000u) return JOB_PENDING;
-        for (unsigned i = 0; i < task->length; ++i) tx[i] = task->data[i];
-        if (spi_driver_start(tx, rx, task->length)) {
+        if (spi_driver_start(task->data, (uint8_t *)rx.words, task->length)) {
             active = task;
             return JOB_PENDING;
         }
@@ -46,7 +47,8 @@ static uint16_t advance(job *task, bool cancel)
     active = 0;
     release_at = now_ms + hold_ms;
     task->complete = task->length;
-    for (unsigned i = 0; i < task->complete; ++i) task->data[i] = rx[i];
+    const uint8_t *bytes = (const uint8_t *)rx.words;
+    for (unsigned i = 0; i < task->complete; ++i) task->data[i] = bytes[i];
     return STATUS_OK;
 }
 
@@ -56,13 +58,24 @@ void spi_poll(uint32_t now)
     jobs_poll(&spi_jobs, advance, now);
 }
 
+static void release_dma(resources *pool)
+{
+    if (!dma_reserved) return;
+    spi_driver_disable_dma();
+    resource_release_item(pool, SPI_OWNER, SPI_DMA_RX);
+    resource_release_item(pool, SPI_OWNER, SPI_DMA_TX);
+    dma_reserved = false;
+}
+
 void spi_stop_all(resources *pool)
 {
     jobs_reset(&spi_jobs, advance);
     abort_transaction();
+    release_dma(pool);
     if (configured) spi_driver_deinit();
     configured = false;
-    resource_release(pool, 7);
+    buffer_release(&rx);
+    resource_release(pool, SPI_OWNER);
 }
 
 static uint16_t configure(resources *pool, const uint8_t *input, uint8_t *out,
@@ -82,14 +95,17 @@ static uint16_t configure(resources *pool, const uint8_t *input, uint8_t *out,
     resource_add(&plan, RESOURCE_PIN('A', 6));
     resource_add(&plan, RESOURCE_PIN('A', 7));
     resource_add(&plan, cs);
-    if (!resource_dma_add(&plan, pool, 7, "SPI1_RX", 2, 0, 3) ||
-        !resource_dma_add(&plan, pool, 7, "SPI1_TX", 2, 3, 3)) return STATUS_BUSY;
     uint8_t conflict;
-    const uint16_t status = resource_reserve(pool, &plan, 7, &conflict);
+    const uint16_t status = resource_reserve(pool, &plan, SPI_OWNER, &conflict);
     if (status != STATUS_OK) return status;
+    if (!buffer_take(&rx, JOB_DATA / sizeof(uint16_t))) {
+        resource_release(pool, SPI_OWNER);
+        return STATUS_FULL;
+    }
     const uint32_t actual_hz = spi_driver_init(&config);
     if (!actual_hz) {
-        resource_release(pool, 7);
+        buffer_release(&rx);
+        resource_release(pool, SPI_OWNER);
         return STATUS_IO;
     }
     setup_ms = (uint16_t)((wire_u16(input + 10) + 999u) / 1000u);
@@ -98,6 +114,29 @@ static uint16_t configure(resources *pool, const uint8_t *input, uint8_t *out,
     word_bytes = (uint8_t)(config.bits / 8);
     wire_put32(out, actual_hz);
     *written = 4;
+    return STATUS_OK;
+}
+
+static uint16_t reserve_dma(resources *pool)
+{
+    resource_plan plan = {0};
+    if (!resource_dma_add(&plan, pool, SPI_OWNER, "SPI1_RX", 2, 0, 3)) {
+        pool->last_conflict = SPI_DMA_RX;
+        return STATUS_BUSY;
+    }
+    if (!resource_dma_add(&plan, pool, SPI_OWNER, "SPI1_TX", 2, 3, 3)) {
+        pool->last_conflict = SPI_DMA_TX;
+        return STATUS_BUSY;
+    }
+    uint8_t conflict;
+    const uint16_t status = resource_reserve(pool, &plan, SPI_OWNER, &conflict);
+    if (status != STATUS_OK) return status;
+    if (!spi_driver_enable_dma()) {
+        resource_release_item(pool, SPI_OWNER, SPI_DMA_RX);
+        resource_release_item(pool, SPI_OWNER, SPI_DMA_TX);
+        return STATUS_IO;
+    }
+    dma_reserved = true;
     return STATUS_OK;
 }
 
@@ -116,15 +155,24 @@ uint16_t spi_command(resources *pool, uint8_t opcode, const uint8_t *input,
         ready_at = now + setup_ms;
         release_at = ready_at + hold_ms;
         return STATUS_OK;
-    case 3:
-        if (length <= 9 || (length - 9) % word_bytes) return STATUS_VALUE;
+    case 3: {
+        if (length <= 9 || length > 9 + JOB_DATA || (length - 9) % word_bytes) return STATUS_VALUE;
         if (!selected) return STATUS_SESSION;
-        return job_submit(&spi_jobs, wire_u32(input + 1), 0, input + 9,
-                          length - 9, now, wire_u32(input + 5));
+        const bool acquire_dma = length - 9 > SPI_IRQ_MAX_BYTES && !dma_reserved;
+        if (acquire_dma) {
+            const uint16_t status = reserve_dma(pool);
+            if (status != STATUS_OK) return status;
+        }
+        const uint16_t status = job_submit(&spi_jobs, wire_u32(input + 1), 0, input + 9,
+                                           length - 9, now, wire_u32(input + 5));
+        if (status != STATUS_OK && acquire_dma) release_dma(pool);
+        return status;
+    }
     case 4:
         if (length != 1 || job_lane_active(&spi_jobs, 0) ||
             (selected && now - release_at >= 0x80000000u)) return STATUS_BUSY;
         abort_transaction();
+        release_dma(pool);
         return STATUS_OK;
     case 5:
         if (length != 1) return STATUS_VALUE;

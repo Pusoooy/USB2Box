@@ -1,4 +1,5 @@
 #include "jobs.h"
+#include "invariant.h"
 
 enum { UNUSED, QUEUED, RUNNING, DONE };
 
@@ -77,7 +78,11 @@ uint16_t job_collect(jobs *queue, uint32_t id, uint8_t *out, uint16_t *written)
     job *task = find(queue, id);
     if (!task) return STATUS_VALUE;
     if (task->state != DONE) return STATUS_BUSY;
-    if (task->complete > JOB_DATA) return STATUS_IO;
+    if (task->complete > JOB_DATA) {
+        USB2_ASSERT(task->complete <= JOB_DATA);
+        task->state = UNUSED;
+        return STATUS_IO;
+    }
     wire_put16(out, task->status);
     wire_put16(out + 2, task->complete);
     for (unsigned i = 0; i < task->complete; ++i) out[4 + i] = task->data[i];

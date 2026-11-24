@@ -1,4 +1,6 @@
 #include "adc_service.h"
+#include "pwm_service.h"
+#include "../host/mock_clock.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -77,5 +79,40 @@ int main(void)
     assert(adc_command(&pool, ADC_REFERENCE_CAL, NULL, 0, out, &written, 1234) == STATUS_OK);
     assert(wire_u16(out) == 1500 && wire_u16(out + 2) == 3300);
     adc_stop_all(&pool);
-    puts("ADC scan timing, automatic resolution, finite capture, trigger, credit and overrun stop passed");
+
+    const uint32_t now = 1240;
+    assert(adc_command(&pool, 1, config, sizeof config, out, &written, now) == STATUS_OK);
+    const uint8_t synced[] = {8, 0, 0, 0, 0, 0};
+    assert(adc_command(&pool, ADC_PWM_START, synced, sizeof synced, out, &written, now) == STATUS_BUSY);
+    const uint8_t pwm[] = {1, 0xe8, 3, 0, 0, 0x90, 0xd0, 3, 0, 0};
+    const uint8_t pwm_second_config[] = {1, 2, 0xe8, 3, 0, 0, 0x90, 0xd0, 3, 0, 0};
+    const uint8_t pwm_start[] = {1, 100, 0, 0, 0, 0, 0, 0, 0};
+    const uint8_t pwm_second[] = {1, 2, 100, 0, 0, 0, 0, 0, 0, 0};
+    const uint8_t group = 1;
+    pwm_mock_tick(now);
+    assert(pwm_command(&pool, 1, pwm, sizeof pwm, out, &written, now) == STATUS_OK);
+    assert(pwm_command(&pool, 9, pwm_second_config, sizeof pwm_second_config, out, &written, now) == STATUS_OK);
+    assert(pwm_command(&pool, 2, pwm_start, sizeof pwm_start, out, &written, now) == STATUS_OK);
+    assert(adc_command(&pool, ADC_PWM_START, synced, sizeof synced, out, &written, now) == STATUS_OK);
+    assert(pwm_command(&pool, 3, pwm, sizeof pwm, out, &written, now) == STATUS_BUSY);
+    assert(pwm_command(&pool, 10, pwm_second, sizeof pwm_second, out, &written, now) == STATUS_BUSY);
+    pwm_mock_tick(now + 2);
+    adc_poll();
+    assert(adc_command(&pool, 6, limit, sizeof limit, out, &written, now + 2) == STATUS_OK);
+    assert(wire_u32(out) == 2000 && wire_u16(out + 12) == 4 && out[15] == 1);
+    assert(pwm_command(&pool, 4, &group, 1, out, &written, now + 2) == STATUS_OK);
+    adc_poll();
+    assert(adc_command(&pool, 6, limit, sizeof limit, out, &written, now + 2) == STATUS_OK);
+    assert(wire_u16(out + 12) == 0 && out[15] == ADC_FLAG_TRIGGER_STOPPED);
+    assert(pwm_command(&pool, 1, pwm, sizeof pwm, out, &written, now + 2) == STATUS_OK);
+    assert(pwm_command(&pool, 2, pwm_start, sizeof pwm_start, out, &written, now + 2) == STATUS_OK);
+    assert(adc_command(&pool, ADC_PWM_START, synced, sizeof synced, out, &written, now + 2) == STATUS_OK);
+    pwm_mock_tick(now + 6);
+    adc_poll();
+    assert(adc_command(&pool, 6, limit, sizeof limit, out, &written, now + 6) == STATUS_OK);
+    assert(wire_u16(out + 12) == 8 && out[15] == 0);
+    assert(pwm_command(&pool, 3, pwm, sizeof pwm, out, &written, now + 6) == STATUS_OK);
+    adc_stop_all(&pool);
+    pwm_stop_all(&pool);
+    puts("ADC scan timing, limits, finite capture, PWM synchronization and trigger stop passed");
 }

@@ -1,9 +1,10 @@
 # M0 资源审查
 
-依据 ST 官方 STM32_open_pin_data 的 LQFP64 封装和 AF XML 验证封装脚号、功能与 AF，并由脚本生成 `schemas/pinmap_candidate.csv`。DMA 参考 Embassy F401RC 数据生成 2×8×8 候选矩阵。ST 官网经当前出站代理返回 HTTP 403，DS9716 与 RM0368 原 PDF 未取得，DMA 矩阵仍需对照 RM0368 Tables 28/29。数据源固定如下。
+M0 依据 ST 官方 STM32_open_pin_data 的 LQFP64 封装和 AF XML 生成候选引脚表，并以 Embassy F401RC 数据生成 DMA 矩阵。0.1.2 补做 ST 官方 PDF 交叉核对。DS9716 Rev 11 表 8 验证了候选表的 47 条封装脚记录，表 9 复核 PA1/PC7 的 AF2 与 PB3 的 AF9。RM0368 Rev 6 表 28、29 和 43 分别复核 DMA 请求映射与 TIM3 TRGO 的 ADC 触发编号。DMA 128 个单元一致，比较时按目标型号去除 SPI4，并去掉候选表中 I²S 扩展请求的 RX/TX 方向后缀。PCB 引出仍待实测。[下载校验与原始日志](evidence/m12-runtime-verify.log)
 
 - ST STM32_open_pin_data，提交 `45c04599e2e0a788c5ed9b6218dc5a28a36041f7`，文件 `mcu/STM32F401R(B-C)Tx.xml`、`mcu/IP/GPIO-STM32F401_gpio_v1_0_Modes.xml`。[来源](https://github.com/STMicroelectronics/STM32_open_pin_data/tree/45c04599e2e0a788c5ed9b6218dc5a28a36041f7)
 - Embassy stm32-data-generated，提交 `5de055b8234e29262a6fcfd8b4f4340071c4752a`，文件 `data/chips/STM32F401RC.json`。[来源](https://github.com/embassy-rs/stm32-data-generated/blob/5de055b8234e29262a6fcfd8b4f4340071c4752a/data/chips/STM32F401RC.json)
+- ST 数据手册与参考手册。[DS9716 Rev 11](https://www.st.com/resource/en/datasheet/stm32f401rc.pdf) · [RM0368 Rev 6](https://www.st.com/resource/en/reference_manual/rm0368-stm32f401xbc-and-stm32f401xde-advanced-armbased-32bit-mcus-stmicroelectronics.pdf)
 
 | 风险或组合 | 静态结论与后续 |
 |---|---|

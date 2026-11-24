@@ -33,7 +33,7 @@ with USB2XXX.open(serial="...") as dev:
 - UART页：双路独立终端、HEX/ASCII、波特率/帧格式、发送文件、收发流量和错误计数。
 - PWM页：多通道频率/占空比ppm/极性/有限脉冲，显示实际硬件频率与分辨率、独立TIM资源及安全停机。
 - SPI页：Mode0-3、MSB/LSB、8/16bit、CS选择、分段事务编辑、HEX读写、吞吐统计。
-- ADC页：单通道高速优先、扫描/触发/预后采样、实时曲线（显示速率/丢样/缓冲状态）、CSV/二进制/NumPy导出；实时绘图不能拖慢USB采集。
+- ADC 页支持单通道、扫描、预后采样及 TIM3 PWM group 1 同步。实时曲线显示速率、丢样和采集状态，可导出 CSV、二进制或 NumPy。
 - 诊断与测试页：Mock/实板标志、自测试接线、Host单测入口、故障/冲突码、日志导出、恢复操作。用户不需要通过修改源码来配置任何基础功能。
 - GUI在无硬件时必须能够连到MockDevice展示功能，且明确视觉标识为SIMULATED，不可冒充真实板。
 
@@ -59,7 +59,7 @@ with USB2XXX.open(serial="...") as dev:
 | `usb2xxx_pwm_stop` | 安全停止指定频率组中的一个输出 | 安全控制 |
 | `usb2xxx_spi_transfer` | 控制器、CS、模式、读/写分段和超时 | 写操作 |
 | `usb2xxx_adc_read` | 输入通道/采样周期/分辨率 | 只读采样 |
-| `usb2xxx_adc_capture` | 通道序列、采样率、长度、触发、timeout | 资源消耗 |
+| `usb2xxx_adc_capture` | 通道、采样率、长度。可选 `pwm_trigger` 使用已启动的 PWM group 1 | 资源消耗 |
 | `usb2xxx_get_diagnostics` | 运行日志、错误码、缓冲统计 | 只读 |
 | `usb2xxx_self_test` | 选择安全测试方案，要求确认已按接线文档连接 | 可能驱动引脚 |
 | `usb2xxx_stop_all` | 所有输出进入安全状态 | 紧急操作 |

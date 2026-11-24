@@ -30,7 +30,7 @@ void wire_put64(uint8_t *p, uint64_t value)
 
 enum {
     LOG_REQUEST_ERROR = 1, LOG_LEASE_EXPIRED, LOG_RESET, LOG_SUSPEND,
-    LOG_OPEN, LOG_STOP,
+    LOG_OPEN, LOG_STOP, LOG_JOB_ERROR,
 };
 
 static void record(device *dev, uint8_t kind, uint8_t level, uint16_t status,
@@ -134,7 +134,8 @@ static uint16_t system_command(device *dev, uint16_t length, uint8_t *out,
         if (length) return STATUS_VALUE;
         wire_put32(out, FEATURE_BULK_STREAMS | FEATURE_I2C_EVENTS |
                         FEATURE_PWM_UPDATE | FEATURE_ADC_TIMING | FEATURE_I2C_RECOVERY |
-                        FEATURE_DIAGNOSTIC_LOG | FEATURE_PWM_CHANNELS);
+                        FEATURE_DIAGNOSTIC_LOG | FEATURE_PWM_CHANNELS | FEATURE_SPI_SHORT |
+                        FEATURE_ADC_PWM);
         *written = 4;
         return STATUS_OK;
     case SYS_DEVICE_INFO:
@@ -269,6 +270,13 @@ static void dispatch(device *dev, uint32_t now)
             status = dev->command ? dev->command(dev->message.service, dev->message.opcode,
                      dev->input, dev->assembled, out, &written, now) : STATUS_OPCODE;
         }
+    }
+    if (status == STATUS_OK && written >= 4 &&
+        ((dev->message.service == SERVICE_SYS && dev->message.opcode == SYS_COLLECT) ||
+         (dev->message.service == SERVICE_SPI && dev->message.opcode == 7))) {
+        const uint16_t job_status = wire_u16(out);
+        if (job_status == STATUS_IO || job_status == STATUS_TIMEOUT)
+            record(dev, LOG_JOB_ERROR, job_status == STATUS_IO ? 2 : 1, job_status, &dev->message);
     }
     enqueue_reply(dev, &dev->message, status, written);
 }

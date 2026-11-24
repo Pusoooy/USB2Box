@@ -114,6 +114,33 @@ def adc_sample(dev, channel):
             "samples": len(values)}
 
 
+def adc_pwm(dev, channel):
+    group, count = 1, 64
+    dev.pwm_configure(group, 1000, 500000)
+    try:
+        dev.pwm_start(group, 750)
+        dev.adc_configure([(channel, 7 if channel >= 16 else 2)])
+        try:
+            dev.adc_start_pwm(count)
+            end = monotonic() + 0.6
+            samples = []
+            while monotonic() < end:
+                block = dev.adc_next_stream(timeout=0.3)
+                if block.dropped or block.trigger_stopped or block.scan_period_ns != 1000000:
+                    raise ValueError("synchronized capture lost samples or reported the wrong trigger interval")
+                samples.extend(block.samples)
+                if not block.running and not block.more_available:
+                    break
+            if len(samples) != count:
+                raise ValueError(f"synchronized capture returned {len(samples)} samples, expected {count}")
+            return {"channel": channel, "pwm_group": group, "samples": len(samples),
+                    "reported_interval_ns": block.scan_period_ns, "min": min(samples), "max": max(samples)}
+        finally:
+            dev.adc_stop()
+    finally:
+        dev.pwm_stop(group)
+
+
 def adc_stream(dev, channel, seconds):
     target = 100000
     dev.adc_configure([(channel, 2)], resolution=0)
@@ -163,7 +190,7 @@ def main():
     parser.add_argument("--vid", type=lambda item: int(item, 0))
     parser.add_argument("--pid", type=lambda item: int(item, 0))
     parser.add_argument("--serial")
-    parser.add_argument("--fixture", choices=("usb", "uart", "i2c", "pwm", "spi", "adc", "adc-stream"),
+    parser.add_argument("--fixture", choices=("usb", "uart", "i2c", "pwm", "spi", "adc", "adc-stream", "adc-pwm"),
                         default="usb")
     parser.add_argument("--board-rev")
     parser.add_argument("--wiring")
@@ -197,6 +224,7 @@ def main():
                 "pwm": lambda: pwm_loop(dev, args.group, args.pwm_channel),
                 "adc": lambda: adc_sample(dev, args.channel),
                 "adc-stream": lambda: adc_stream(dev, args.channel, args.seconds),
+                "adc-pwm": lambda: adc_pwm(dev, args.channel),
             }[args.fixture]()
         if args.fixture == "adc-stream":
             metrics = report["metrics"]
@@ -205,7 +233,7 @@ def main():
                 report["detail"] = "ADC stream ended early or was incomplete"
                 report["verdict"] = "FAILED"
                 return 1
-        report["verdict"] = "MEASURED" if args.fixture in ("adc", "adc-stream") else "PASS"
+        report["verdict"] = "MEASURED" if args.fixture in ("adc", "adc-stream", "adc-pwm") else "PASS"
         return 0
     except Exception as error:
         report["detail"] = str(error)

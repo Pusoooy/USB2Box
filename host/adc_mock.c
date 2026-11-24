@@ -8,7 +8,7 @@ static bool active, finite, threshold, watchdog;
 static uint8_t watchdog_channel;
 static uint16_t lo, hi;
 static uint32_t mock_now, started_at, rate;
-static bool timed, timer_triggered;
+static bool timed, timer_triggered, pwm_triggered;
 
 void adc_mock_tick(uint32_t now)
 {
@@ -42,6 +42,7 @@ bool adc_driver_start(const adc_config *config, const adc_plan *plan, uint16_t s
     remaining = samples;
     finite = samples != 0;
     timer_triggered = plan->timer_ticks != 0;
+    pwm_triggered = plan->pwm_trigger;
     rate = plan->aggregate_rate;
     started_at = mock_now;
     active = true;
@@ -53,8 +54,10 @@ uint16_t adc_driver_read(uint16_t *samples, uint32_t *overflow)
     (void)overflow;
     if (!active) return 0;
     uint16_t count = finite && remaining < ADC_BLOCK ? remaining : ADC_BLOCK;
-    if (timed && timer_triggered) {
-        const uint64_t available = (uint64_t)(mock_now - started_at) * rate / 1000u - value;
+    if (pwm_triggered || (timed && timer_triggered)) {
+        const uint64_t produced = pwm_triggered ? pwm_mock_adc_cycles() * rank_count :
+                                  (uint64_t)(mock_now - started_at) * rate / 1000u;
+        const uint64_t available = produced > value ? produced - value : 0;
         if (available < count) count = (uint16_t)available;
     }
     for (unsigned i = 0; i < count; ++i) {

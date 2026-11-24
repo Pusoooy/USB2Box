@@ -1,25 +1,23 @@
 #include "adc_service.h"
+#include "buffer_pool.h"
+#include "pwm_service.h"
 
 static adc_config config;
 static adc_plan capture;
-static uint16_t cache[ADC_CACHE];
+static buffer_lease cache;
 static uint64_t total_samples, target;
 static uint32_t consumed, dropped, start_ms, stream_tag;
 static uint16_t pre_trigger, post_trigger, credits;
 static uint8_t stream_mode;
-static bool configured, running, awaiting_trigger, stream_finished, threshold_seen;
+static bool configured, running, awaiting_trigger, stream_finished, threshold_seen, trigger_stopped;
 
 /* ADC clock cycles from the STM32F401 regular conversion settings. */
 static const uint16_t sample_cycles[] = {3, 15, 28, 56, 84, 112, 144, 480};
 
-bool adc_plan_capture(const adc_config *cfg, uint32_t hz, uint32_t timer_hz,
-                      uint32_t adc_hz, adc_plan *plan)
+static bool plan_ticks(const adc_config *cfg, uint32_t ticks, uint32_t timer_hz,
+                       uint32_t adc_hz, adc_plan *plan)
 {
-    if (!timer_hz || !adc_hz || !cfg->ranks || cfg->ranks > ADC_RANKS ||
-        (hz && hz < cfg->ranks)) return false;
-    const uint64_t scaled = (uint64_t)timer_hz * cfg->ranks;
-    const uint64_t ticks = hz ? (scaled + hz - 1) / hz : 0;
-    if (ticks > UINT32_MAX) return false;
+    if (!timer_hz || !adc_hz || !cfg->ranks || cfg->ranks > ADC_RANKS) return false;
     uint32_t sample_total = 0;
     for (unsigned rank = 0; rank < cfg->ranks; ++rank) {
         if (cfg->times[rank] >= sizeof sample_cycles / sizeof sample_cycles[0]) return false;
@@ -27,16 +25,17 @@ bool adc_plan_capture(const adc_config *cfg, uint32_t hz, uint32_t timer_hz,
     }
     uint8_t bits = cfg->resolution ? cfg->resolution : 12;
     while (bits >= 6 && ticks &&
-           (uint64_t)(sample_total + (bits + 2u) * cfg->ranks) * timer_hz > ticks * adc_hz) {
+           (uint64_t)(sample_total + (bits + 2u) * cfg->ranks) * timer_hz > (uint64_t)ticks * adc_hz) {
         if (cfg->resolution) return false;
         bits -= 2;
     }
     if (bits != 6 && bits != 8 && bits != 10 && bits != 12) return false;
 
     plan->resolution = bits;
-    plan->timer_ticks = (uint32_t)ticks;
-    plan->aggregate_rate = ticks ? (uint32_t)(scaled / ticks) : 1;
-    plan->scan_ns = (uint32_t)((ticks * 1000000000u + timer_hz / 2u) / timer_hz);
+    plan->timer_ticks = ticks;
+    plan->aggregate_rate = ticks ? (uint32_t)(((uint64_t)timer_hz * cfg->ranks) / ticks) : 1;
+    plan->scan_ns = (uint32_t)(((uint64_t)ticks * 1000000000u + timer_hz / 2u) / timer_hz);
+    plan->pwm_trigger = false;
     uint32_t elapsed = 0;
     for (unsigned rank = 0; rank < cfg->ranks; ++rank) {
         const uint32_t sample = sample_cycles[cfg->times[rank]];
@@ -46,9 +45,21 @@ bool adc_plan_capture(const adc_config *cfg, uint32_t hz, uint32_t timer_hz,
     return true;
 }
 
+bool adc_plan_capture(const adc_config *cfg, uint32_t hz, uint32_t timer_hz,
+                      uint32_t adc_hz, adc_plan *plan)
+{
+    if (hz && hz < cfg->ranks) return false;
+    const uint64_t scaled = (uint64_t)timer_hz * cfg->ranks;
+    const uint64_t ticks = hz ? (scaled + hz - 1u) / hz : 0;
+    return ticks <= UINT32_MAX && plan_ticks(cfg, (uint32_t)ticks, timer_hz, adc_hz, plan);
+}
+
 static void stop(void)
 {
-    if (running) adc_driver_stop();
+    if (running) {
+        if (capture.pwm_trigger) pwm_release_adc_clock();
+        adc_driver_stop();
+    }
     running = awaiting_trigger = false;
 }
 
@@ -58,8 +69,10 @@ void adc_stop_all(resources *pool)
     configured = false;
     credits = 0;
     stream_tag = 0;
+    trigger_stopped = false;
     total_samples = consumed = 0;
     capture = (adc_plan){0};
+    buffer_release(&cache);
     resource_release(pool, 8);
 }
 
@@ -96,11 +109,15 @@ void adc_poll(void)
             ++consumed;
         }
         const uint32_t index = (uint32_t)total_samples++;
-        cache[index % ADC_CACHE] = block[i];
+        cache.words[index % ADC_CACHE] = block[i];
         if (!awaiting_trigger && target && total_samples == target) {
             stop();
             return;
         }
+    }
+    if (capture.pwm_trigger && !pwm_adc_clock_running()) {
+        trigger_stopped = true;
+        stop();
     }
 }
 
@@ -138,29 +155,53 @@ static uint16_t configure(resources *pool, const uint8_t *input, uint16_t length
     uint8_t conflict;
     const uint16_t status = resource_reserve(pool, &plan, 8, &conflict);
     if (status != STATUS_OK) return status;
+    if (!buffer_take(&cache, ADC_CACHE)) {
+        resource_release(pool, 8);
+        return STATUS_FULL;
+    }
     config = next;
     configured = true;
     return STATUS_OK;
 }
 
-static uint16_t start(uint32_t hz, uint16_t samples, uint16_t pre, uint16_t post, uint32_t now)
+static uint16_t start(uint32_t hz, uint16_t samples, uint16_t pre, uint16_t post, uint32_t now,
+                      bool pwm_trigger)
 {
     if (!configured || running) return STATUS_BUSY;
     if (hz > 100000 || (hz && hz < config.ranks) || samples > ADC_CACHE ||
         (pre || post ? samples || !post || (uint32_t)pre + post > ADC_CACHE : false))
         return STATUS_VALUE;
-    if (!hz && (samples != 1 || config.ranks != 1 || pre || post)) return STATUS_VALUE;
+    if (!hz && !pwm_trigger && (samples != 1 || config.ranks != 1 || pre || post)) return STATUS_VALUE;
     adc_plan plan = {0};
     uint32_t timer, converter;
     adc_driver_clocks(&timer, &converter);
-    if (!adc_plan_capture(&config, hz, timer, converter, &plan)) return STATUS_VALUE;
+    if (pwm_trigger) {
+        uint32_t ticks;
+        if (!pwm_claim_adc_clock(&ticks)) return STATUS_BUSY;
+        if (!ticks || (uint64_t)timer * config.ranks > 100000ull * ticks ||
+            !plan_ticks(&config, ticks, timer, converter, &plan)) {
+            pwm_release_adc_clock();
+            return STATUS_VALUE;
+        }
+        plan.pwm_trigger = true;
+    } else if (!adc_plan_capture(&config, hz, timer, converter, &plan)) {
+        return STATUS_VALUE;
+    }
     adc_config active = config;
     active.resolution = plan.resolution;
     if (!config.resolution && active.watchdog) {
         active.low >>= 12 - plan.resolution;
         active.high >>= 12 - plan.resolution;
     }
-    if (!adc_driver_start(&active, &plan, post ? 0 : samples)) return STATUS_IO;
+    if (!adc_driver_start(&active, &plan, post ? 0 : samples)) {
+        if (pwm_trigger) pwm_release_adc_clock();
+        return STATUS_IO;
+    }
+    if (pwm_trigger && !pwm_driver_adc_trigger(true)) {
+        adc_driver_stop();
+        pwm_release_adc_clock();
+        return STATUS_BUSY;
+    }
     capture = plan;
     start_ms = now;
     total_samples = consumed = dropped = 0;
@@ -171,7 +212,7 @@ static uint16_t start(uint32_t hz, uint16_t samples, uint16_t pre, uint16_t post
     credits = 0;
     stream_tag = 0;
     stream_mode = 0;
-    stream_finished = threshold_seen = false;
+    stream_finished = threshold_seen = trigger_stopped = false;
     running = true;
     return STATUS_OK;
 }
@@ -186,9 +227,10 @@ static uint16_t read_samples(uint8_t *out, uint16_t limit)
     wire_put16(out + 12, limit);
     out[14] = capture.resolution ? capture.resolution : (config.resolution ? config.resolution : 12);
     out[15] = (uint8_t)((running ? 1 : 0) | (awaiting_trigger ? 2 : 0) |
-                        (available > limit ? 4 : 0) | (threshold_seen ? 8 : 0));
+                        (available > limit ? 4 : 0) | (threshold_seen ? 8 : 0) |
+                        (trigger_stopped ? ADC_FLAG_TRIGGER_STOPPED : 0));
     for (unsigned i = 0; i < limit; ++i)
-        wire_put16(out + 16 + 2 * i, cache[consumed++ % ADC_CACHE]);
+        wire_put16(out + 16 + 2 * i, cache.words[consumed++ % ADC_CACHE]);
     return (uint16_t)(16 + 2 * limit);
 }
 
@@ -237,10 +279,10 @@ uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
     case 1:
         return configure(pool, input, length);
     case 2:
-        return length == 0 ? start(0, 1, 0, 0, now) : STATUS_VALUE;
+        return length == 0 ? start(0, 1, 0, 0, now, false) : STATUS_VALUE;
     case 3:
         return length == 10 ? start(wire_u32(input), wire_u16(input + 4),
-                                    wire_u16(input + 6), wire_u16(input + 8), now) : STATUS_VALUE;
+                                    wire_u16(input + 6), wire_u16(input + 8), now, false) : STATUS_VALUE;
     case 4:
         if (length != 0) return STATUS_VALUE;
         adc_stop_all(pool);
@@ -307,6 +349,9 @@ uint16_t adc_command(resources *pool, uint8_t opcode, const uint8_t *input,
         *written = 4;
         return STATUS_OK;
     }
+    case ADC_PWM_START:
+        return length == 6 ? start(0, wire_u16(input), wire_u16(input + 2),
+                                   wire_u16(input + 4), now, true) : STATUS_VALUE;
     default:
         return STATUS_OPCODE;
     }

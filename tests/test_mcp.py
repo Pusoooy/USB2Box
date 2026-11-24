@@ -75,6 +75,17 @@ class MCPTests(unittest.TestCase):
                     chunk = outcome(await session.call_tool("usb2xxx_read_capture_chunk",
                                                             {"capture_id": capture_id, "count": 8}))
                     self.assertEqual(len(chunk["actual_values"]["samples"]), 8)
+                    configured = outcome(await session.call_tool("usb2xxx_pwm_configure", {
+                        "group": 1, "frequency_hz": 1000, "duty_ppm": 250000, "confirm": True}))
+                    self.assertEqual(configured["status"], "ok")
+                    started = outcome(await session.call_tool("usb2xxx_pwm_start", {
+                        "group": 1, "duration_ms": 500, "arm": True, "confirm": True}))
+                    self.assertEqual(started["status"], "ok")
+                    synced = outcome(await session.call_tool("usb2xxx_adc_capture", {
+                        "channel": 10, "samples": 16, "pwm_trigger": True, "confirm": True}))
+                    self.assertEqual(synced["actual_values"]["total"], 16)
+                    self.assertEqual(synced["actual_values"]["sample_rate"], 1000)
+                    self.assertFalse(synced["actual_values"]["trigger_stopped"])
                     stopped = outcome(await session.call_tool("usb2xxx_stop_all"))
                     self.assertEqual(stopped["actual_values"]["session"], "closed")
 

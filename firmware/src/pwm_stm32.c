@@ -155,6 +155,17 @@ bool pwm_driver_update_pending(unsigned group)
     return pending_update[group];
 }
 
+bool pwm_driver_adc_trigger(bool enable)
+{
+    const uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    const bool available = active_channels[1] != 0;
+    if (__HAL_RCC_TIM3_IS_CLK_ENABLED() && (!enable || available))
+        MODIFY_REG(TIM3->CR2, TIM_CR2_MMS, enable ? TIM_TRGO_UPDATE : TIM_TRGO_RESET);
+    __set_PRIMASK(mask);
+    return !enable || available;
+}
+
 static void compare_irq(unsigned group)
 {
     TIM_TypeDef *timer = timers[group];

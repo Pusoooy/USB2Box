@@ -35,6 +35,10 @@ def verify(nm, image):
         raise ValueError(f"{image}: invalid SRAM or stack bounds")
     if any(name in symbols for name in ("malloc", "calloc", "realloc", "free")):
         raise ValueError(f"{image}: dynamic allocator linked into firmware")
+    if image.parent.name.startswith(("debug", "release")):
+        debug = image.parent.name.startswith("debug")
+        if ("usb2_assert_failed" in symbols) != debug:
+            raise ValueError(f"{image}: incorrect Debug assertion configuration")
     print(f"{image}: core and peripheral IRQ vectors, stack bounds and no allocator verified")
 
 

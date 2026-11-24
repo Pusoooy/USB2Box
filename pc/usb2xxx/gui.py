@@ -470,6 +470,8 @@ class Workbench(QMainWindow):
             [tuple(map(int, part.split(":"))) for part in v["channels"].split(",")], int(v["res"])))
         self._action(page, "Capture", lambda d, v: d.adc_start(
             int(v["hz"]), int(v["count"]), int(v["pre"]), int(v["post"])), self._capture_started)
+        self._action(page, "Capture on PWM group 1", lambda d, v: d.adc_start_pwm(
+            int(v["count"]), int(v["pre"]), int(v["post"])), self._capture_started)
         self._action(page, "Trigger", lambda d, _: d.adc_trigger())
         self._action(page, "Watchdog", lambda d, v: d.adc_watchdog(*map(int, v["watchdog"].split(":"))))
         self._action(page, "Estimate Vref", lambda d, _: {"reference_volts": d.adc_estimate_reference()})
@@ -514,8 +516,13 @@ class Workbench(QMainWindow):
                 self.last_block = block
                 self.plot.add(block)
         block = blocks[-1]
-        self.adc_status.setText(f"{block.rate:,} samples/s  ·  {block.dropped:,} lost  ·  "
-                                f"{'Waiting for trigger' if block.awaiting_trigger else 'Capturing' if block.running else 'Stopped'}")
+        if block.trigger_stopped:
+            status = "PWM trigger stopped"
+        elif block.awaiting_trigger:
+            status = "Waiting for trigger"
+        else:
+            status = "Capturing" if block.running else "Stopped"
+        self.adc_status.setText(f"{block.rate:,} samples/s  ·  {block.dropped:,} lost  ·  {status}")
         self.capturing = block.running or block.more_available
 
     def _export_adc(self):

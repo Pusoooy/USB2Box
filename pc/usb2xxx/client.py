@@ -27,6 +27,8 @@ FEATURE_ADC_TIMING = 1 << 3
 FEATURE_I2C_RECOVERY = 1 << 4
 FEATURE_DIAGNOSTIC_LOG = 1 << 5
 FEATURE_PWM_CHANNELS = 1 << 6
+FEATURE_SPI_SHORT = 1 << 7
+FEATURE_ADC_PWM = 1 << 8
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,7 @@ class ADCBlock:
     first_rank: int = 0
     scan_channels: tuple[int, ...] = ()
     rank_offsets_ns: tuple[int, ...] = ()
+    trigger_stopped: bool = False
 
     @classmethod
     def decode(cls, raw: bytes, *, timed: bool = False) -> ADCBlock:
@@ -104,7 +107,7 @@ class ADCBlock:
         if len(raw) != 16 + count * 2 or bits not in (6, 8, 10, 12):
             raise ProtocolError("ADC metadata does not match samples")
         return cls(rate, offset, dropped, bits, bool(flags & 1), bool(flags & 2), bool(flags & 4), bool(flags & 8),
-                   struct.unpack_from(f"<{count}H", raw, 16), **metadata)
+                   struct.unpack_from(f"<{count}H", raw, 16), trigger_stopped=bool(flags & 16), **metadata)
 
     def sample_position(self, index: int) -> tuple[int, int]:
         """Return the scan rank and estimated device time in µs."""
@@ -525,6 +528,12 @@ class USB2XXX:
     def adc_start(self, rate: int, samples: int = 0, pre: int = 0, post: int = 0) -> None:
         with self._adc_lock:
             self.call(ADC, 3, struct.pack("<IHHH", rate, samples, pre, post))
+            self._adc_unsubscribe()
+
+    def adc_start_pwm(self, samples: int = 0, pre: int = 0, post: int = 0) -> None:
+        """Start one scan per period of the active TIM3 PWM group (group 1)."""
+        with self._adc_lock:
+            self.call(ADC, 13, struct.pack("<HHH", samples, pre, post))
             self._adc_unsubscribe()
 
     def adc_watchdog(self, channel: int, low: int, high: int) -> None:

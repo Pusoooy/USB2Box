@@ -8,7 +8,7 @@ static DMA_HandleTypeDef adc_dma;
 static volatile uint32_t ready, errors;
 static uint32_t read_at;
 static uint16_t finite;
-static bool active;
+static bool active, internal_timer;
 static volatile bool threshold;
 
 static const uint32_t sample_time[] = {
@@ -17,7 +17,7 @@ static const uint32_t sample_time[] = {
     ADC_SAMPLETIME_144CYCLES, ADC_SAMPLETIME_480CYCLES,
 };
 
-static bool configure_adc(const adc_config *cfg, bool timer)
+static bool configure_adc(const adc_config *cfg, const adc_plan *plan)
 {
     const uint32_t resolutions[] = {ADC_RESOLUTION_6B, ADC_RESOLUTION_8B,
                                     ADC_RESOLUTION_10B, ADC_RESOLUTION_12B};
@@ -27,9 +27,10 @@ static bool configure_adc(const adc_config *cfg, bool timer)
             .ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4,
             .Resolution = resolutions[(cfg->resolution - 6) / 2],
             .ScanConvMode = cfg->ranks > 1,
-            .ExternalTrigConvEdge = timer ? ADC_EXTERNALTRIGCONVEDGE_RISING :
-                                           ADC_EXTERNALTRIGCONVEDGE_NONE,
-            .ExternalTrigConv = timer ? ADC_EXTERNALTRIGCONV_T2_TRGO : ADC_SOFTWARE_START,
+            .ExternalTrigConvEdge = plan->timer_ticks ? ADC_EXTERNALTRIGCONVEDGE_RISING :
+                                                       ADC_EXTERNALTRIGCONVEDGE_NONE,
+            .ExternalTrigConv = plan->pwm_trigger ? ADC_EXTERNALTRIGCONV_T3_TRGO :
+                               (internal_timer ? ADC_EXTERNALTRIGCONV_T2_TRGO : ADC_SOFTWARE_START),
             .DataAlign = ADC_DATAALIGN_RIGHT, .NbrOfConversion = cfg->ranks,
             .DMAContinuousRequests = ENABLE, .EOCSelection = ADC_EOC_SEQ_CONV,
         },
@@ -74,15 +75,15 @@ void adc_driver_reference(uint16_t *code, uint16_t *millivolts)
 bool adc_driver_start(const adc_config *cfg, const adc_plan *plan, uint16_t samples)
 {
     const uint32_t ticks = plan->timer_ticks;
+    internal_timer = ticks != 0 && !plan->pwm_trigger;
     __HAL_RCC_ADC1_CLK_ENABLE();
     __HAL_RCC_DMA2_CLK_ENABLE();
-    __HAL_RCC_TIM2_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
     __HAL_RCC_ADC_FORCE_RESET();
     __HAL_RCC_ADC_RELEASE_RESET();
-    if (!configure_adc(cfg, ticks != 0)) {
+    if (!configure_adc(cfg, plan)) {
         HAL_ADC_DeInit(&adc);
         return false;
     }
@@ -105,12 +106,15 @@ bool adc_driver_start(const adc_config *cfg, const adc_plan *plan, uint16_t samp
     }
     ready = read_at = errors = 0;
     threshold = false;
-    TIM2->CR1 = 0;
-    TIM2->CR2 = TIM_TRGO_UPDATE;
-    TIM2->PSC = 0;
-    TIM2->ARR = ticks ? ticks - 1 : 0;
-    TIM2->EGR = TIM_EGR_UG;
-    TIM2->SR = 0;
+    if (internal_timer) {
+        __HAL_RCC_TIM2_CLK_ENABLE();
+        TIM2->CR1 = 0;
+        TIM2->CR2 = TIM_TRGO_UPDATE;
+        TIM2->PSC = 0;
+        TIM2->ARR = ticks - 1;
+        TIM2->EGR = TIM_EGR_UG;
+        TIM2->SR = 0;
+    }
     HAL_NVIC_SetPriority(DMA2_Stream4_IRQn, 7, 0);
     HAL_NVIC_SetPriority(ADC_IRQn, 7, 0);
     HAL_NVIC_ClearPendingIRQ(DMA2_Stream4_IRQn);
@@ -125,14 +129,14 @@ bool adc_driver_start(const adc_config *cfg, const adc_plan *plan, uint16_t samp
         return false;
     }
     active = true;
-    if (ticks) TIM2->CR1 = TIM_CR1_CEN;
+    if (internal_timer) TIM2->CR1 = TIM_CR1_CEN;
     return true;
 }
 
 void adc_driver_stop(void)
 {
     if (!active) return;
-    TIM2->CR1 = 0;
+    if (internal_timer) TIM2->CR1 = 0;
     HAL_NVIC_DisableIRQ(DMA2_Stream4_IRQn);
     HAL_NVIC_DisableIRQ(ADC_IRQn);
     HAL_ADC_Stop_DMA(&adc);

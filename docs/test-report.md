@@ -112,3 +112,18 @@ Linux x86-64，Debian 13，Host GCC 14.2.0，ARM GCC 14.2.1，binutils 2.44。�
 | H00–H09 与 Windows 10/11 运行 | NOT_RUN / WAITING_HARDWARE | `make hil-verify` 缺设备及合法 VID/PID 返回 2。实板波形、WinUSB、USB 连续 100 kSPS 仍待采集 |
 
 默认 Debug 链接结果为 57,124 B Flash、33,444 B 静态 RAM，Release 为 48,108 B Flash、33,436 B 静态 RAM，另留 8 KiB 栈。Windows 候选 ZIP 的 SHA-256 为 `8ad222c1e01caf089ee48449be495ca1676e763a6c32553b478c7d53c9f22dd4`。运行时日志保留了 Qt offscreen、上游 MCP 设置定义与 pip 缓存目录提示。[原始日志](evidence/m12-channels-verify.log)
+
+## M12 0.1.2 运行时与同步采集
+
+| 验证 | 结果 | 覆盖 |
+|---|---|---|
+| `make -B -j4 verify-all` | exit 0 | ARM GCC 14.2.1 与 CPython 3.12。帧、资源和五外设 Host 单测、SDK、Qt offscreen 和 MCP stdio |
+| C Host UBSan | exit 0 | 时钟、协议、设备、资源、UART、I²C、PWM、SPI、ADC 及流。共享缓冲分配耗尽、失败回收和重新使用 |
+| SPI 与诊断 | HOST_MOCK_PASS | 短分段在 DMA 已被占用时成功，长分段原子申请 DMA。混合传输、CS 事务、超时和取消的部分结果，以及 I²C 作业故障日志 |
+| 同步 ADC | HOST_MOCK_PASS | 两通道扫描跟随 TIM3，源提前停止保留状态。SDK、GUI、MCP 及离线安装后运行的 C Mock 夹具通过，夹具收齐 64 个样本 |
+| ARM 镜像 | exit 0 | 默认和 8、25 MHz HSE 候选的 Debug/Release。IRQ 向量、静态 RAM 范围、分配器缺失和 Debug 断言符号检查通过 |
+| ST 封装、DMA 和触发源 | 文件核对通过 | DS9716 Rev 11 表 8/9，RM0368 Rev 6 表 28/29/43。47 条 LQFP64 记录、128 个 DMA 单元和 TIM3 TRGO 已复核 |
+| Windows x64 0.1.2 | Linux 静态校验通过 | 117 项 SHA-256 与 ZIP 完整性、PE32+ 模拟器及 DLL、Windows CPython 3.12 目标的 SHA-256 锁定离线依赖。Linux 独立虚拟环境的 SDK 与 SPI/ADC 模拟入口通过 |
+| H00–H09 和 Windows 运行 | NOT_RUN / WAITING_HARDWARE | `make hil-verify` 缺实板和合法 VID/PID 返回 2。SPI 电气时序、TIM3 触发相位及持续 USB 吞吐待测 |
+
+默认 Debug 链接为 62,972 B Flash、33,252 B 静态 RAM，Release 为 49,844 B Flash、33,236 B 静态 RAM，另留 8 KiB 栈。Release 静态 RAM 比 0.1.1 低 200 B。0.1.2 Windows x64 候选 ZIP 的 SHA-256 为 `9abe7afc5f0550668feb89a2f78a73c95335cb8394a05dd627dbb855dd15aa8a`。[原始日志](evidence/m12-runtime-verify.log)

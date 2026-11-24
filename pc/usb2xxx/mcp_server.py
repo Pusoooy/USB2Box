@@ -266,15 +266,19 @@ def create_server(adapter: Adapter) -> FastMCP:
     def usb2xxx_adc_capture(channel: Channel,
                             samples: Annotated[int, Field(ge=1, le=4096)] = 256,
                             sample_rate: Annotated[int, Field(ge=1000, le=100000)] = 10000,
-                            confirm: bool = False) -> dict:
+                            confirm: bool = False, pwm_trigger: bool = False) -> dict:
         """Perform a bounded capture and return a local in-memory capture ID."""
         def capture(dev):
             data: list[int] = []
             first = None
             dev.adc_configure([(channel, 7 if channel >= 16 else 2)])
             try:
-                dev.adc_start(sample_rate, samples)
-                until = monotonic() + samples / sample_rate + 1.0
+                if pwm_trigger:
+                    dev.adc_start_pwm(samples)
+                    until = monotonic() + 2.0
+                else:
+                    dev.adc_start(sample_rate, samples)
+                    until = monotonic() + samples / sample_rate + 1.0
                 while True:
                     if monotonic() >= until:
                         raise Deadline("capture completion deadline")
@@ -292,7 +296,8 @@ def create_server(adapter: Adapter) -> FastMCP:
             finally:
                 dev.adc_stop()
             completed = replace(first or block, dropped=block.dropped, running=False, awaiting_trigger=False,
-                                more_available=False, threshold_seen=block.threshold_seen, samples=tuple(data))
+                                more_available=False, threshold_seen=block.threshold_seen,
+                                trigger_stopped=block.trigger_stopped, samples=tuple(data))
             adapter.next_capture += 1
             capture_id = adapter.next_capture
             adapter.captures[capture_id] = completed
@@ -300,6 +305,7 @@ def create_server(adapter: Adapter) -> FastMCP:
                 adapter.captures.popitem(last=False)
             return {"capture_id": capture_id, "total": len(data),
                     "sample_rate": completed.rate, "dropped": completed.dropped,
+                    "trigger_stopped": completed.trigger_stopped,
                     "first_device_us_estimated": completed.first_device_us,
                     "scan_channels": completed.scan_channels}
         return adapter.use(capture, mutating=True, confirm=confirm)

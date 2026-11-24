@@ -9,12 +9,39 @@ import time
 import unittest
 
 from usb2xxx import Busy, Deadline, I2CMessage, LeaseExpired, RemoteError, USB2XXX
-from usb2xxx.client import FEATURE_PWM_CHANNELS
+from usb2xxx.client import FEATURE_ADC_PWM, FEATURE_PWM_CHANNELS, FEATURE_SPI_SHORT
 from usb2xxx.protocol import HEADER, FrameReader
 from usb2xxx.transport import acquire_device_lock
 
 
 class SDKTests(unittest.TestCase):
+    def test_pwm_clocked_adc(self):
+        with USB2XXX.open(mock=True) as dev:
+            updated = FEATURE_ADC_PWM | FEATURE_SPI_SHORT
+            self.assertEqual(dev.features() & updated, updated)
+            dev.adc_configure([(10, 2)])
+            with self.assertRaises(Busy):
+                dev.adc_start_pwm(16)
+            dev.pwm_configure(1, 1000, 250000)
+            dev.pwm_start(1, 500)
+            dev.adc_start_pwm(16)
+            captured = []
+            while True:
+                block = dev.adc_next_stream(0.3)
+                captured.extend(block.samples)
+                if not block.running and not block.more_available:
+                    break
+            self.assertEqual(len(captured), 16)
+            self.assertEqual((block.rate, block.scan_period_ns, block.trigger_stopped),
+                             (1000, 1000000, False))
+            dev.adc_start_pwm()
+            dev.pwm_stop(1)
+            while True:
+                block = dev.adc_next_stream(0.3)
+                if not block.running and not block.more_available:
+                    break
+            self.assertTrue(block.trigger_stopped)
+
     def test_shared_device_and_lease_safety(self):
         with USB2XXX.open(mock=True) as dev:
             self.assertEqual(dev.capabilities()["message"], 1024)
@@ -43,6 +70,8 @@ class SDKTests(unittest.TestCase):
             with self.assertRaises(RemoteError) as error:
                 dev.i2c_transfer(0, 41, [I2CMessage(read=2)])
             self.assertEqual(error.exception.status, 0x4001)
+            self.assertTrue(any(record["kind"] == 7 and record["status"] == 0x4001
+                                for record in dev.diagnostic_log(minimum_level=2)["entries"]))
             self.assertEqual(dev.i2c_recover(0), {"pulses": 0, "scl_high": True, "sda_high": True})
 
             for group in range(2):
@@ -67,6 +96,7 @@ class SDKTests(unittest.TestCase):
             self.assertEqual(dev.adc_estimate_reference(), 3.3)
             dev.adc_configure([(10, 2), (11, 2)])
             dev.adc_start(50000, 256)
+            self.assertEqual(dev.spi_transfer([b"irq", pattern], cs=0), [b"irq", pattern])
             with self.assertRaises(Busy) as conflict:
                 dev.spi_transfer([b"collision"], cs=1)
             deadline = time.monotonic() + 0.3

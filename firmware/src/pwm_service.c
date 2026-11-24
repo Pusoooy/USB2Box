@@ -13,7 +13,7 @@ typedef struct {
 } pwm_group;
 
 static pwm_group groups[PWM_GROUPS];
-static bool capture;
+static bool capture, adc_clock_claimed;
 
 static const uint8_t output_pin[PWM_GROUPS][PWM_CHANNELS] = {
     {RESOURCE_PIN('A', 0), RESOURCE_PIN('A', 1)},
@@ -93,6 +93,30 @@ static void refresh_period(unsigned group)
     state->updating = false;
 }
 
+bool pwm_claim_adc_clock(uint32_t *ticks)
+{
+    const unsigned group = 1;
+    refresh_period(group);
+    if (adc_clock_claimed || groups[group].updating || !group_running(group)) return false;
+    const unsigned channel = pwm_driver_running(group, 0) ? 0 : 1;
+    if (!pwm_driver_running(group, channel)) return false;
+    const pwm_period *period = &groups[group].outputs[channel].period;
+    *ticks = (period->prescaler + 1u) * (period->reload + 1u);
+    adc_clock_claimed = true;
+    return true;
+}
+
+bool pwm_adc_clock_running(void)
+{
+    return group_running(1);
+}
+
+void pwm_release_adc_clock(void)
+{
+    pwm_driver_adc_trigger(false);
+    adc_clock_claimed = false;
+}
+
 static bool suitable_for_count(const pwm_period *period, uint32_t clock)
 {
     const uint64_t divider = period->prescaler + 1u;
@@ -118,7 +142,8 @@ static uint16_t configure(resources *pool, unsigned group, unsigned channel, boo
     pwm_output *sibling = &state->outputs[1 - channel];
     const bool running = pwm_driver_running(group, channel);
     const bool sibling_running = pwm_driver_running(group, 1 - channel);
-    if (state->updating || (running && !update) || (update && !output->configured && sibling_running))
+    if (state->updating || (running && !update) || (update && !output->configured && sibling_running) ||
+        (update && group == 1 && adc_clock_claimed))
         return STATUS_BUSY;
     const uint32_t clock = pwm_driver_clock();
     const unsigned width = group == 0 ? 32 : 16;
@@ -217,7 +242,8 @@ uint16_t pwm_command(resources *pool, uint8_t opcode, const uint8_t *input,
     }
     case 2: {
         if (length != 8 || !output->configured) return STATUS_VALUE;
-        if (pwm_driver_running(group, channel) || state->updating) return STATUS_BUSY;
+        if (pwm_driver_running(group, channel) || state->updating ||
+            (group == 1 && adc_clock_claimed)) return STATUS_BUSY;
         const uint32_t duration = wire_u32(input), pulses = wire_u32(input + 4);
         if (!duration || duration > 60000) return STATUS_VALUE;
         if (pulses && !suitable_for_count(&output->period, pwm_driver_clock())) return STATUS_VALUE;
